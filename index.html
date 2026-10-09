@@ -131,9 +131,30 @@ function trainerOrder(e){const k=TRAINER_ORDER[(e.nr||'').trim()]??TRAINER_ORDER
   let list=[];try{list=S.exercises||[];}catch(_){}const ord=list.map(x=>x.order||0);
   if(e.cat==='rumpf')return Math.max(110,...ord)+10;
   const firstCore=Math.min(...list.filter(x=>x.cat==='rumpf').map(x=>x.order||999),999);return firstCore-1;}
-function migrate(s){s.settings=Object.assign(defaultSettings(),s.settings||{});s.sessions=s.sessions||[];s.exercises.forEach(e=>{e.hist=e.hist||[];if(typeof e.order!=='number')e.order=trainerOrder(e);});return s;}
-function load(){try{const s=JSON.parse(localStorage.getItem(STORE));if(s&&Array.isArray(s.exercises))return migrate(s);}catch(e){}return seed();}
-let S=load();
+/* Trainer-Vorgaben: Sätze × Wdh.-Bereich (doppelte Progression) + Ausführungstipp */
+const RX={
+ '3028':{sets:2,reps:12,repsMax:15,cue:'Aufrecht sitzen, langsam öffnen, 2 s zurück – nicht zurückschnellen lassen.'},
+ '3020':{sets:3,reps:10,repsMax:12,cue:'Brust raus, Stange zur oberen Brust, Schulterblätter aktiv nach unten ziehen.'},
+ '3003':{sets:3,reps:10,repsMax:12,cue:'Becken fest ins Polster, kontrolliert beugen, 3 s zurück.'},
+ '3002':{sets:3,reps:10,repsMax:12,cue:'Becken fest ins Polster, kontrolliert beugen, 3 s zurück.'},
+ '3016':{sets:3,reps:10,repsMax:12,cue:'Griffe auf Brusthöhe, Schulterblätter zusammen, Ellbogen leicht unter Schulterhöhe.'},
+ '3023':{sets:3,reps:10,repsMax:12,cue:'Schulterblätter fixiert, kontrolliert zurück, nicht abfedern.'},
+ '3031':{sets:3,reps:10,repsMax:12,cue:'Knie zeigen über die Fußspitzen, oben nicht ganz durchstrecken, 3 s ablassen. Bei Knieschmerz Bewegung verkürzen.'},
+ '3040':{sets:3,reps:10,repsMax:12,cue:'Brust ans Polster, Ellbogen eng nach hinten, Schulterblätter zusammenziehen.'},
+ '3001':{sets:3,reps:12,repsMax:15,cue:'Polster knapp über dem Fußgelenk, oben 1 s halten, 3 s ablassen. Leicht beginnen, schmerzfrei bleiben.'},
+ 'schulterpresse':{sets:3,reps:10,repsMax:12,cue:'Rücken fest anlehnen, kein Hohlkreuz, Arme oben nicht ganz durchstrecken.'},
+ '3029':{sets:2,reps:12,repsMax:15,cue:'Langsam schließen, kurz halten, kontrolliert öffnen.'},
+ '3037':{sets:3,reps:12,repsMax:15,cue:'Beim Einrollen ausatmen, Bewegung aus dem Bauch, nicht mit den Armen ziehen.'},
+ '3008':{sets:3,reps:12,repsMax:15,cue:'Langsam einrollen, unten nicht ablegen – Spannung halten.'},
+ 'rückenstrecker':{sets:3,reps:12,repsMax:15,cue:'Langsam aufrichten bis zur geraden Haltung, nicht überstrecken.'}
+};
+const rxOf=e=>RX[(e.nr||'').trim()]||RX[(e.name||'').trim().toLowerCase()];
+function applyRx(e){const r=rxOf(e);if(r){e.sets=r.sets;e.reps=r.reps;e.repsMax=r.repsMax;e.cue=r.cue;}return !!r;}
+const repStr=e=>(e.repsMax&&e.repsMax>e.reps)?`${e.reps}–${e.repsMax}`:String(e.reps);
+function parseRange(s){const m=String(s).match(/(\d+)\D+(\d+)/);if(m)return [+m[1],+m[2]];const n=parseInt(s);return isNaN(n)?null:[n,n];}
+function migrate(s){s.settings=Object.assign(defaultSettings(),s.settings||{});s.sessions=s.sessions||[];s.exercises.forEach(e=>{e.hist=e.hist||[];if(typeof e.order!=='number')e.order=trainerOrder(e);if(!s.rx)applyRx(e);if(!e.repsMax)e.repsMax=e.reps;if(e.cue===undefined)e.cue='';});s.rx=1;return s;}
+function load(){try{const s=JSON.parse(localStorage.getItem(STORE));if(s&&Array.isArray(s.exercises))return migrate(s);}catch(e){}return migrate(seed());}
+let S=load();save();
 function save(){try{localStorage.setItem(STORE,JSON.stringify(S));}catch(e){toast('Speichern fehlgeschlagen');}}
 const X=id=>S.exercises.find(e=>e.id===id);
 const XX=id=>X(id)||{id,name:'(gelöschtes Gerät)',nr:'',cat:'rumpf',type:'iso',group:'',sets:3,reps:10,weight:0,knee:false,prio:3,note:'',hist:[],order:999};
@@ -154,7 +175,7 @@ function stepper(val,minus,plus,cls='',valClick=''){return `<div class="stepper 
 
 /* ================= Regel-Trainer ================= */
 function restFor(e){if(e.rest)return e.rest;if(e.cat==='rumpf')return 45;if(e.type==='iso')return 60;return (+e.reps<=8)?120:90;}
-function single(e){return {kind:'single',rounds:e.sets,rest:restFor(e),restIn:0,items:[{exId:e.id,reps:String(e.reps),weight:e.weight,hint:''}]};}
+function single(e){return {kind:'single',rounds:e.sets,rest:restFor(e),restIn:0,items:[{exId:e.id,reps:repStr(e),weight:e.weight,hint:''}]};}
 function blockSec(b){const n=b.items.length;return b.rounds*n*40+b.rounds*(n-1)*(b.restIn||0)+(b.rounds-1)*b.rest+45+(b.warmupSet?100:0);}
 function planSec(p){return p.warmup.min*60+p.blocks.reduce((s,b)=>s+blockSec(b),0);}
 const prioOf=e=>e.prio*10-(e.knee?1:0);
@@ -235,6 +256,7 @@ Feste Regeln:
 - Mindestens zwei Übungen mit knie_fokus=true pro Einheit. Übungen mit knie_fokus nie schwerer als das aktuelle Gewicht, wenn die letzte Notiz auf Schmerzen hindeutet.
 - Sanfter Einstieg: Nach dem Aufwärmen zuerst gelenkschonende Übungen (Hüfte, Beinbeuger, Oberkörper-Zug). Die Beinpresse (schwere Mehrgelenk-Beinübung) frühestens als 3. Station und mit warmupSet=true (ein leichter Aufwärmsatz vorweg).
 - Ober- und Unterkörper abwechseln, Rumpf am Ende. Orientiere dich an standard_reihenfolge (vom Trainer festgelegt) und begründe Abweichungen.
+- Basis sind die Trainer-Vorgaben (standard = Sätze x Wdh.-Bereich, doppelte Progression). reps darf ein Bereich wie "10–12" sein.
 - Pausen in Sekunden legst du passend zu Übung und Satzschema fest (rest = nach jedem Satz bzw. jeder Runde, restIn = zwischen Geräten innerhalb eines Supersatzes/Zirkels).
 - Zeitbudget einhalten: Schätzung 40 s pro Satz + Pausen + 45 s Gerätewechsel pro Station + Aufwärmen.
 - Verwende ausschließlich Geräte-IDs aus der Liste.
@@ -254,14 +276,14 @@ async function askAI(system,user,maxTokens){
 }
 function parseJSON(t){const m=String(t).match(/\{[\s\S]*\}/);return JSON.parse(m?m[0]:t);}
 function trainerContext(){
-  return {geraete:S.exercises.filter(e=>e.active).map(e=>({id:e.id,name:e.name,nr:e.nr,kategorie:CATS[e.cat],typ:TYPES[e.type],knie_fokus:e.knee,prioritaet:PRIOS[e.prio],gruppe:e.group,standard:`${e.sets}x${e.reps}`,gewicht_kg:e.weight,start_kg:e.startWeight,letzte_notiz:e.note})),
+  return {geraete:S.exercises.filter(e=>e.active).map(e=>({id:e.id,name:e.name,nr:e.nr,kategorie:CATS[e.cat],typ:TYPES[e.type],knie_fokus:e.knee,prioritaet:PRIOS[e.prio],gruppe:e.group,standard:`${e.sets}x${repStr(e)}`,tipp:e.cue,gewicht_kg:e.weight,start_kg:e.startWeight,letzte_notiz:e.note})),
     standard_reihenfolge:S.exercises.filter(e=>e.active).sort((a,b)=>a.order-b.order).map(e=>e.name+(e.nr?' '+e.nr:'')),
     letzte_trainings:S.sessions.slice(0,4).map(sessionForAI)};
 }
 function sessionForAI(s){return {datum:s.date.slice(0,10),modus:s.mode,dauer_min:s.min,uebungen:s.entries.map(x=>({id:x.exId,name:x.name,ziel_wdh:x.target,saetze:x.sets.map(z=>z.w+'kg x '+z.reps).join(', '),notiz:x.note}))};}
 function validatePlan(p){
   const blocks=(p.blocks||[]).map(b=>({warmupSet:b.warmupSet===true,kind:['single','superset','zirkel'].includes(b.kind)?b.kind:'single',rounds:clamp(parseInt(b.rounds)||3,1,8),rest:clamp(parseInt(b.rest)||90,15,300),restIn:clamp(parseInt(b.restIn)||0,0,120),
-    items:(b.items||[]).filter(i=>i&&X(i.exId)).map(i=>({exId:i.exId,reps:String(i.reps??X(i.exId).reps),weight:isFinite(+i.weight)&&i.weight!==null?+i.weight:X(i.exId).weight,hint:String(i.hint||'').slice(0,140)}))})).filter(b=>b.items.length);
+    items:(b.items||[]).filter(i=>i&&X(i.exId)).map(i=>({exId:i.exId,reps:String(i.reps??repStr(X(i.exId))),weight:isFinite(+i.weight)&&i.weight!==null?+i.weight:X(i.exId).weight,hint:String(i.hint||'').slice(0,140)}))})).filter(b=>b.items.length);
   blocks.forEach(b=>{if(b.items.length===1)b.kind='single';else if(b.kind==='single')b.kind='superset';if(b.kind!=='single'&&!b.restIn)b.restIn=20;});
   if(!blocks.length)throw new Error('Plan war leer');
   return {title:String(p.title||''),comment:String(p.comment||''),warmup:{min:clamp(parseInt(p.warmup&&p.warmup.min)||S.settings.warmup,0,30),text:String((p.warmup&&p.warmup.text)||S.settings.warmupText)},blocks};
@@ -349,7 +371,7 @@ function blockCard(b,bi){
 function toggleEdit(bi){ui.editBlock=ui.editBlock===bi?null:bi;render();}
 function wu(d){const p=S.draft;p.warmup.min=clamp(p.warmup.min+d,0,30);save();render();}
 function bset(bi,k,d){const b=S.draft.blocks[bi],lim={rounds:[1,8],rest:[15,300],restIn:[0,120]}[k];b[k]=clamp((b[k]||0)+d,lim[0],lim[1]);save();render();}
-function iset(bi,ii,k,d){const it=S.draft.blocks[bi].items[ii];if(k==='reps'){const n=parseInt(it.reps);if(isNaN(n))return;it.reps=String(clamp(n+d,1,50));}else it.weight=r2(Math.max(0,+it.weight+d*S.settings.step));save();render();}
+function iset(bi,ii,k,d){const it=S.draft.blocks[bi].items[ii];if(k==='reps'){const r=parseRange(it.reps);if(!r)return;const a=clamp(r[0]+d,1,50),b=clamp(r[1]+d,1,60);it.reps=a===b?String(a):a+'–'+b;}else it.weight=r2(Math.max(0,+it.weight+d*S.settings.step));save();render();}
 function iweight(bi,ii){const it=S.draft.blocks[bi].items[ii];const v=prompt('Gewicht in kg',it.weight);if(v===null)return;const n=parseFloat(String(v).replace(',','.'));if(isFinite(n)&&n>=0){it.weight=n;save();render();}}
 function moveBlock(bi,d){const a=S.draft.blocks,j=bi+d;if(j<0||j>=a.length)return;[a[bi],a[j]]=[a[j],a[bi]];ui.editBlock=j;save();render();}
 function removeBlock(bi){S.draft.blocks.splice(bi,1);ui.editBlock=null;save();render();}
@@ -366,13 +388,13 @@ function similar(exId){
 function pickExercise(title,sections,cb,dimIds=[]){
   pickCb=cb;
   let h=`<div class="row between"><h1 style="margin:0">${esc(title)}</h1><button class="btn sm" onclick="closeSheet()">Schließen</button></div>`;
-  sections.forEach(([t,list])=>{if(!list.length)return;h+=`<h2>${esc(t)}</h2>`+list.map(x=>`<button class="pick ${dimIds.includes(x.id)?'dim':''}" onclick="pickDone('${x.id}')"><b>${esc(x.name)}</b> <span class="muted small">${x.nr?'#'+esc(x.nr):''}</span>${x.knee?' <span class="tag knee">Knie</span>':''}<div class="small muted">${CATS[x.cat]} · ${x.sets}×${x.reps} · ${fmtW(x.weight)}${x.group?' · '+esc(x.group):''}${dimIds.includes(x.id)?' · schon im Plan':''}</div></button>`).join('');});
+  sections.forEach(([t,list])=>{if(!list.length)return;h+=`<h2>${esc(t)}</h2>`+list.map(x=>`<button class="pick ${dimIds.includes(x.id)?'dim':''}" onclick="pickDone('${x.id}')"><b>${esc(x.name)}</b> <span class="muted small">${x.nr?'#'+esc(x.nr):''}</span>${x.knee?' <span class="tag knee">Knie</span>':''}<div class="small muted">${CATS[x.cat]} · ${x.sets}×${repStr(x)} · ${fmtW(x.weight)}${x.group?' · '+esc(x.group):''}${dimIds.includes(x.id)?' · schon im Plan':''}</div></button>`).join('');});
   openSheet(h);
 }
 function pickDone(id){const cb=pickCb;pickCb=null;closeSheet();if(cb)cb(id);}
 function replaceItem(bi,ii){
   const it=S.draft.blocks[bi].items[ii];
-  pickExercise('Ersetzen durch',similar(it.exId),id=>{const n=X(id),b=S.draft.blocks[bi];it.exId=id;it.weight=n.weight;it.reps=String(n.reps);it.hint='';if(b.kind==='single'){b.rounds=n.sets;b.rest=restFor(n);}save();render();});
+  pickExercise('Ersetzen durch',similar(it.exId),id=>{const n=X(id),b=S.draft.blocks[bi];it.exId=id;it.weight=n.weight;it.reps=repStr(n);it.hint='';if(b.kind==='single'){b.rounds=n.sets;b.rest=restFor(n);}save();render();});
 }
 function addToPlan(){
   const inPlan=S.draft.blocks.flatMap(b=>b.items.map(i=>i.exId)),act=S.exercises.filter(e=>e.active);
@@ -436,8 +458,9 @@ function setView(){
   <h1 class="ex-title">${esc(e.name)}</h1>
   <div class="setno">${multi?'Runde':'Satz'} ${st.r+1} von ${b.rounds}</div>
   <div class="card"><div class="row between"><span class="muted">Gewicht</span>${stepper(fmtW(it.weight),'wAdj(-1)','wAdj(1)','lg','wSet()')}</div>
-  <div class="row between" style="margin-top:12px"><span class="muted">Wdh.</span>${reps!==null?stepper(reps,'rAdj(-1)','rAdj(1)','lg'):`<b style="font-size:22px">${esc(it.reps)}</b>`}</div></div>
+  <div class="row between" style="margin-top:12px"><span class="muted">Wdh.${/\D/.test(it.reps)&&parseRange(it.reps)?'<br><span class="small">Ziel '+esc(it.reps)+'</span>':''}</span>${reps!==null?stepper(reps,'rAdj(-1)','rAdj(1)','lg'):`<b style="font-size:22px">${esc(it.reps)}</b>`}</div></div>
   ${it.hint?`<div class="card small">💡 ${esc(it.hint)}</div>`:''}
+  ${e.cue&&st.r===0?`<div class="card small"><span class="muted">Trainer-Tipp:</span> ${esc(e.cue)}</div>`:''}
   ${e.note?`<div class="card small"><span class="muted">Notiz vom letzten Mal:</span> ${esc(e.note)}</div>`:''}
   ${L.sets.length?`<div class="small muted sets">Heute: ${L.sets.map(s=>fmtW(s.w).replace(' kg','')+'×'+s.reps).join(' · ')}</div>`:''}
   <button class="btn primary huge" onclick="setDone()">✓ Satz fertig</button>
@@ -496,7 +519,7 @@ function skipEx(){
 }
 function replaceInSession(){
   const {it,b}=cur();
-  pickExercise('Ersetzen durch',similar(it.exId),id=>{const n=X(id);it.exId=id;it.weight=n.weight;it.reps=String(n.reps);it.hint='';if(b.kind==='single')b.rest=restFor(n);ui.reps=null;save();render();});
+  pickExercise('Ersetzen durch',similar(it.exId),id=>{const n=X(id);it.exId=id;it.weight=n.weight;it.reps=repStr(n);it.hint='';if(b.kind==='single')b.rest=restFor(n);ui.reps=null;save();render();});
 }
 
 /* Abschluss */
@@ -509,12 +532,15 @@ function finish(){
     const e=X(l.exId);
     if(e){
       if(l.sets.length){const w=l.sets[l.sets.length-1].w;e.hist.push({d:day,w,reps:l.sets.map(s=>s.reps)});
-        if(String(l.target)===String(e.reps))e.weight=w;
-        const tgt=parseInt(l.target),allReps=!isNaN(tgt)&&l.sets.length>=l.rounds&&l.sets.every(s=>+s.reps>=tgt);
+        if(String(l.target)===repStr(e))e.weight=w;
+        const rg=parseRange(l.target),std=String(l.target)===repStr(e),full=l.sets.length>=l.rounds;
+        const atTop=rg&&full&&l.sets.every(s=>+s.reps>=rg[1]),tooHeavy=rg&&l.sets.some(s=>+s.reps<rg[0]-2);
         const hurt=painful(l.note)||(e.knee&&!l.note.trim()&&painful(e.note));
         if(sugg.some(x=>x.exId===e.id)){}
         else if(hurt)sugg.push({exId:e.id,to:null,reason:'Notiz deutet auf Knie-/Gelenkbeschwerden – Gewicht halten und beobachten.'});
-        else if(allReps&&w>0&&String(l.target)===String(e.reps))sugg.push({exId:e.id,to:r2(e.weight+S.settings.step),reason:`Alle Sätze mit ${tgt} Wdh. geschafft – bereit für mehr.`});}
+        else if(std&&atTop&&w>0)sugg.push({exId:e.id,to:r2(e.weight+S.settings.step),reason:`Obergrenze von ${rg[1]} Wdh. in allen Sätzen erreicht – nächstes Mal mehr Gewicht und wieder bei ${rg[0]} Wdh. starten.`});
+        else if(std&&tooHeavy&&w>0)sugg.push({exId:e.id,to:r2(Math.max(0,e.weight-S.settings.step)),reason:`Deutlich unter ${rg[0]} Wdh. – etwas leichter, damit die Technik sauber bleibt.`});
+        else if(std&&rg&&rg[1]>rg[0]&&full)sugg.push({exId:e.id,to:null,reason:`Gewicht halten und nächstes Mal 1–2 Wdh. mehr anpeilen (Ziel ${rg[1]}).`});}
       if(l.note.trim())e.note=l.note.trim();
     }
     return {exId:l.exId,name:e?e.name:'?',nr:e?e.nr:'',sets:l.sets,note:l.note.trim(),target:l.target};
@@ -557,11 +583,11 @@ async function aiReview(){
 function vDevices(){
   let h=`<div class="row between"><h1 style="margin:4px 0">Geräte</h1><button class="btn primary sm" onclick="editEx()">+ Neues Gerät</button></div><p class="muted small">Gleiche „Gruppe“ = Alternativen, die sich gegenseitig ersetzen können.</p><button class="btn big" onclick="orderSheet()">⇅ Reihenfolge im Training</button>`;
   Object.entries(CATS).forEach(([k,t])=>{const list=S.exercises.filter(e=>e.cat===k);if(!list.length)return;
-    h+=`<h2>${t}</h2>`+list.map(e=>`<button class="pick ${e.active?'':'dim'}" onclick="editEx('${e.id}')"><div class="row between"><b>${esc(e.name)} <span class="muted small">${e.nr?'#'+esc(e.nr):''}</span></b><span>${fmtW(e.weight)}</span></div><div class="small muted">${e.sets}×${e.reps} · ${TYPES[e.type]}${e.group?' · '+esc(e.group):''} ${e.knee?'<span class="tag knee">Knie</span>':''} ${e.active?'':'<span class="tag">inaktiv</span>'}</div></button>`).join('');});
+    h+=`<h2>${t}</h2>`+list.map(e=>`<button class="pick ${e.active?'':'dim'}" onclick="editEx('${e.id}')"><div class="row between"><b>${esc(e.name)} <span class="muted small">${e.nr?'#'+esc(e.nr):''}</span></b><span>${fmtW(e.weight)}</span></div><div class="small muted">${e.sets}×${repStr(e)} · ${TYPES[e.type]}${e.group?' · '+esc(e.group):''} ${e.knee?'<span class="tag knee">Knie</span>':''} ${e.active?'':'<span class="tag">inaktiv</span>'}</div></button>`).join('');});
   return h;
 }
 function editEx(id){
-  const e=id?X(id):{id:'',name:'',nr:'',cat:'beine',type:'iso',group:'',sets:3,reps:10,weight:0,startWeight:0,knee:false,prio:2,rest:null,note:'',active:true,hist:[]};
+  const e=id?X(id):{id:'',name:'',nr:'',cat:'beine',type:'iso',group:'',sets:3,reps:10,repsMax:12,cue:'',weight:0,startWeight:0,knee:false,prio:2,rest:null,note:'',active:true,hist:[]};
   const groups=[...new Set(S.exercises.map(x=>x.group).filter(Boolean))];
   const opt=(o,v)=>Object.entries(o).map(([k,t])=>`<option value="${k}" ${String(k)===String(v)?'selected':''}>${t}</option>`).join('');
   const hist=(e.hist||[]).slice(-8).reverse();
@@ -569,10 +595,12 @@ function editEx(id){
   <div class="grid2"><div><label class="f">Name</label><input id="f_name" value="${esc(e.name)}" placeholder="z. B. Wadenpresse"></div><div><label class="f">Gerätenummer</label><input id="f_nr" value="${esc(e.nr)}" inputmode="numeric" placeholder="z. B. 3010"></div></div>
   <div class="grid2"><div><label class="f">Kategorie</label><select id="f_cat">${opt(CATS,e.cat)}</select></div><div><label class="f">Art</label><select id="f_type">${opt(TYPES,e.type)}</select></div></div>
   <label class="f">Gruppe (Alternativen)</label><input id="f_group" list="grp" value="${esc(e.group)}" placeholder="z. B. Brust"><datalist id="grp">${groups.map(g=>`<option value="${esc(g)}">`).join('')}</datalist>
-  <div class="grid3"><div><label class="f">Sätze</label><input id="f_sets" type="number" min="1" max="8" value="${e.sets}"></div><div><label class="f">Wdh.</label><input id="f_reps" type="number" min="1" max="50" value="${e.reps}"></div><div><label class="f">Gewicht kg</label><input id="f_w" type="number" step="0.5" min="0" value="${e.weight}"></div></div>
+  <div class="grid3"><div><label class="f">Sätze</label><input id="f_sets" type="number" min="1" max="8" value="${e.sets}"></div><div><label class="f">Wdh. von</label><input id="f_reps" type="number" min="1" max="50" value="${e.reps}"></div><div><label class="f">Wdh. bis</label><input id="f_repsMax" type="number" min="1" max="60" value="${e.repsMax||e.reps}"></div></div>
+  <label class="f">Gewicht kg</label><input id="f_w" type="number" step="0.5" min="0" value="${e.weight}">
   <div class="grid2"><div><label class="f">Priorität</label><select id="f_prio">${opt(PRIOS,e.prio)}</select></div><div><label class="f">Pause (s)</label><input id="f_rest" type="number" min="15" max="300" value="${e.rest||''}" placeholder="Trainer: ${restFor(Object.assign({},e,{rest:null}))}"></div></div>
   <label class="row" style="margin-top:14px"><input type="checkbox" id="f_knee" ${e.knee?'checked':''}> <span>Knie-Fokus (wird bei Schmerz-Notiz nicht gesteigert)</span></label>
   <label class="row" style="margin-top:10px"><input type="checkbox" id="f_active" ${e.active?'checked':''}> <span>Aktiv (wird für Pläne genutzt)</span></label>
+  <label class="f">Trainer-Tipp zur Ausführung</label><textarea id="f_cue" placeholder="z. B. 3 s ablassen">${esc(e.cue||'')}</textarea>
   <label class="f">Notiz (Freitext)</label><textarea id="f_note" placeholder="Sitzeinstellung, Hinweise …">${esc(e.note)}</textarea>
   ${id?`<p class="small muted">Start: ${fmtW(e.startWeight)} → jetzt ${fmtW(e.weight)}</p>${hist.length?`<div class="small muted sets">${hist.map(x=>`${new Date(x.d).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'})}: ${fmtW(x.w)}`).join(' · ')}</div>`:''}`:''}
   <button class="btn primary big" style="margin-top:16px" onclick="saveEx('${e.id}')">Speichern</button>
@@ -583,8 +611,9 @@ function saveEx(id){
   let e=id?X(id):null;const isNew=!e;
   if(isNew){e={id:uid(),hist:[],startWeight:null,order:0};S.exercises.push(e);}
   const w=parseFloat(v('w').value.replace(',','.'))||0;
-  Object.assign(e,{name,nr:v('nr').value.trim(),cat:v('cat').value,type:v('type').value,group:v('group').value.trim(),sets:clamp(parseInt(v('sets').value)||3,1,8),reps:clamp(parseInt(v('reps').value)||10,1,50),weight:w,prio:+v('prio').value,rest:parseInt(v('rest').value)?clamp(parseInt(v('rest').value),15,300):null,knee:v('knee').checked,active:v('active').checked,note:v('note').value.trim()});
+  Object.assign(e,{name,nr:v('nr').value.trim(),cat:v('cat').value,type:v('type').value,group:v('group').value.trim(),sets:clamp(parseInt(v('sets').value)||3,1,8),reps:clamp(parseInt(v('reps').value)||10,1,50),repsMax:clamp(parseInt(v('repsMax').value)||0,1,60),cue:v('cue').value.trim(),weight:w,prio:+v('prio').value,rest:parseInt(v('rest').value)?clamp(parseInt(v('rest').value),15,300):null,knee:v('knee').checked,active:v('active').checked,note:v('note').value.trim()});
   if(e.startWeight===null)e.startWeight=w;
+  if(!e.repsMax||e.repsMax<e.reps)e.repsMax=e.reps;
   if(isNew){e.order=0;e.order=trainerOrder(e);}
   save();closeSheet();render();toast(isNew?name+' angelegt':'Gespeichert');
 }
@@ -623,8 +652,10 @@ function vSettings(){
   <h2>Daten</h2><div class="card"><p class="small muted" style="margin-top:0">Alle Daten liegen nur auf diesem Handy. Mach ab und zu ein Backup.</p>
   <div class="row wrap" style="gap:8px"><button class="btn grow" onclick="exportData()">Backup speichern</button><button class="btn grow" onclick="document.getElementById('imp').click()">Backup laden</button></div>
   <input type="file" id="imp" accept="application/json,.json" style="display:none" onchange="importData(this.files[0])">
-  <button class="btn big danger" style="margin-top:12px" onclick="resetAll()">Alles zurücksetzen</button></div>
-  <p class="small muted center">Trainingscoach · Version 1.1</p>`;
+  <button class="btn big" style="margin-top:12px" onclick="resetRx()">Trainer-Vorgaben neu laden</button>
+  <p class="small muted">Setzt Sätze, Wdh.-Bereiche und Tipps deiner Startgeräte auf die Trainer-Werte zurück. Gewichte und Verlauf bleiben.</p>
+  <button class="btn big danger" style="margin-top:4px" onclick="resetAll()">Alles zurücksetzen</button></div>
+  <p class="small muted center">Trainingscoach · Version 1.2</p>`;
 }
 function saveSettings(){
   const g=id=>document.getElementById(id),st=S.settings;
@@ -643,7 +674,8 @@ function importData(file){
   r.onload=()=>{try{const o=JSON.parse(r.result);if(!Array.isArray(o.exercises))throw 0;const key=S.settings.apiKey;S=migrate(o);if(!S.settings.apiKey)S.settings.apiKey=key;save();toast('Backup geladen');ui.view='home';render();}catch(e){toast('Datei ist kein gültiges Backup');}};
   r.readAsText(file);
 }
-function resetAll(){if(!confirm('Alle Geräte, Verläufe und Einstellungen löschen und mit der Startliste neu beginnen?'))return;S=seed();save();ui.view='home';render();}
+function resetRx(){const n=S.exercises.filter(applyRx).length;save();toast(n+' Geräte auf Trainer-Vorgaben gesetzt');}
+function resetAll(){if(!confirm('Alle Geräte, Verläufe und Einstellungen löschen und mit der Startliste neu beginnen?'))return;S=migrate(seed());save();ui.view='home';render();}
 
 /* ================= System ================= */
 const sheet=document.getElementById('sheet');
