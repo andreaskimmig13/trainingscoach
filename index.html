@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0e1013">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Coach">
 <title>Trainingscoach</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon-192.png">
@@ -266,8 +270,7 @@ Feste Regeln:
 - Basis sind die Trainer-Vorgaben (standard = Sätze x Wdh.-Bereich, doppelte Progression). reps darf ein Bereich wie "10–12" sein.
 - Pausen in Sekunden legst du passend zu Übung und Satzschema fest (rest = nach jedem Satz bzw. jeder Runde, restIn = zwischen Geräten innerhalb eines Supersatzes/Zirkels).
 - Zeitbudget einhalten: Schätzung 40 s pro Satz + Pausen + 45 s Gerätewechsel pro Station + Aufwärmen.
-- Verwende ausschließlich Geräte-IDs aus der Liste.
-Antworte ausschließlich mit gültigem JSON, ohne Text davor oder danach.`;
+- Verwende ausschließlich Geräte-IDs aus der Liste.`;
 const MODE_AI={
   variation:'Basis ist das Standardprogramm. Tausche 2–3 Übungen gegen Alternativen (gleiche Gruppe oder Kategorie) und variiere bei 1–2 Übungen Satzschema oder Tempo. Bleib nah am Bewährten.',
   frei:'Volle Freiheit: Plane die Einheit neu. Nutze gern Supersätze, Zirkel, Pyramiden oder Tempovorgaben (als kurzer hint). Abwechslungsreich, aber sicher und zielgerichtet.'
@@ -281,6 +284,27 @@ async function askAI(system,user,maxTokens){
   if(!r.ok){let m='';try{m=(await r.json()).error.message;}catch(e){}throw new Error('API '+r.status+(m?': '+m:''));}
   const j=await r.json();return (j.content||[]).filter(c=>c.type==='text').map(c=>c.text).join('');
 }
+/* Strukturierte Antwort: Die KI muss über ein Werkzeug mit festem Schema antworten -> immer gültiges JSON */
+async function askAITool(system,user,tool,schema,maxTokens){
+  const st=S.settings;if(!st.apiKey)throw new Error('Kein API-Schlüssel');
+  const call=async()=>{
+    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':st.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
+      body:JSON.stringify({model:st.model,max_tokens:maxTokens,system,tools:[{name:tool,description:'Ergebnis strukturiert übergeben.',input_schema:schema}],tool_choice:{type:'tool',name:tool},messages:[{role:'user',content:user}]})});
+    if(!r.ok){let m='';try{m=(await r.json()).error.message;}catch(e){}const err=new Error('API '+r.status+(m?': '+m:''));err.status=r.status;throw err;}
+    const j=await r.json(),b=(j.content||[]).find(c=>c.type==='tool_use');
+    if(!b||!b.input)throw new Error(j.stop_reason==='max_tokens'?'Antwort zu lang':'Keine strukturierte Antwort');
+    return b.input;};
+  try{return await call();}catch(e){if(e.status&&e.status<500&&e.status!==429)throw e;return await call();}
+}
+const PLAN_TOOL_SCHEMA={type:'object',required:['title','comment','warmup','blocks'],properties:{
+  title:{type:'string',description:'kurzer Name der Einheit'},comment:{type:'string',description:'2–3 Sätze Begründung, du-Form'},
+  warmup:{type:'object',required:['min','text'],properties:{min:{type:'integer'},text:{type:'string'}}},
+  blocks:{type:'array',items:{type:'object',required:['kind','rounds','rest','items'],properties:{
+    kind:{type:'string',enum:['single','superset','zirkel']},rounds:{type:'integer'},rest:{type:'integer',description:'Pause in s nach jedem Satz/jeder Runde'},
+    restIn:{type:'integer',description:'Pause in s zwischen Geräten im Supersatz/Zirkel'},warmupSet:{type:'boolean'},
+    items:{type:'array',items:{type:'object',required:['exId','reps','weight'],properties:{exId:{type:'string'},reps:{type:'string',description:'z. B. "10–12" oder "15"'},weight:{type:'number'},hint:{type:'string'}}}}}}}}};
+const REVIEW_TOOL_SCHEMA={type:'object',required:['text','vorschlaege'],properties:{text:{type:'string',description:'4–6 Sätze, du-Form, motivierend und konkret'},
+  vorschlaege:{type:'array',items:{type:'object',required:['exId','gewicht','grund'],properties:{exId:{type:'string'},gewicht:{type:'number'},grund:{type:'string'}}}}}};
 function parseJSON(t){const m=String(t).match(/\{[\s\S]*\}/);return JSON.parse(m?m[0]:t);}
 function trainerContext(){
   return {geraete:S.exercises.filter(e=>e.active).map(e=>({id:e.id,name:e.name,nr:e.nr,kategorie:CATS[e.cat],typ:TYPES[e.type],knie_fokus:e.knee,prioritaet:PRIOS[e.prio],gruppe:e.group,standard:`${e.sets}x${repStr(e)}`,tipp:e.cue,gewicht_kg:e.weight,start_kg:e.startWeight,letzte_notiz:e.note})),
@@ -296,8 +320,8 @@ function validatePlan(p){
   return {title:String(p.title||''),comment:String(p.comment||''),warmup:{min:clamp(parseInt(p.warmup&&p.warmup.min)||S.settings.warmup,0,30),text:String((p.warmup&&p.warmup.text)||S.settings.warmupText)},blocks};
 }
 async function aiPlan(mode,minutes){
-  const user=`Modus: ${MODES[mode].t}\nAufgabe: ${MODE_AI[mode]}\nVerfügbare Zeit inkl. Aufwärmen: ${minutes} min. Standard-Aufwärmen: ${S.settings.warmup} min (${S.settings.warmupText}).\nAntwortformat:\n${PLAN_SCHEMA}\n\nDaten:\n${JSON.stringify(trainerContext())}`;
-  return validatePlan(parseJSON(await askAI(TRAINER_SYS,user,4000)));
+  const user=`Modus: ${MODES[mode].t}\nAufgabe: ${MODE_AI[mode]}\nVerfügbare Zeit inkl. Aufwärmen: ${minutes} min. Standard-Aufwärmen: ${S.settings.warmup} min (${S.settings.warmupText}).\nÜbergib den Plan mit dem Werkzeug plan_speichern.\n\nDaten:\n${JSON.stringify(trainerContext())}`;
+  return validatePlan(await askAITool(TRAINER_SYS,user,'plan_speichern',PLAN_TOOL_SCHEMA,4000));
 }
 
 /* ================= UI-Zustand ================= */
@@ -330,6 +354,7 @@ async function doInstall(){if(!installEvt)return;installEvt.prompt();try{await i
 function installCard(){
   if(isStandalone()||location.protocol==='file:')return '';
   if(installEvt)return `<div class="card hl"><b>Als App installieren</b><div class="muted small">Dann startet der Trainingscoach wie eine normale App vom Startbildschirm – ohne Browserleiste.</div><button class="btn primary big" style="margin-top:10px" onclick="doInstall()">App installieren</button></div>`;
+  if(/iPhone|iPad|iPod/.test(navigator.userAgent))return `<div class="card"><b>Als App installieren</b><div class="muted small">Öffne diese Seite in <b>Safari</b>, tippe unten auf <b>Teilen</b> (Quadrat mit Pfeil) und dann auf <b>„Zum Home-Bildschirm“</b>. Danach startest du den Coach über das Symbol auf dem Home-Bildschirm.</div></div>`;
   return `<div class="card"><b>Als App installieren</b><div class="muted small">Öffne diese Seite in <b>Chrome</b> (nicht in einer anderen App), tippe oben rechts auf <b>⋮</b> und dann auf <b>„App installieren“</b> bzw. <b>„Zum Startbildschirm hinzufügen“ → „Installieren“</b>.</div></div>`;
 }
 function vHome(){
@@ -360,7 +385,7 @@ function vPlan(){
   let h=`<div class="row between"><button class="btn ghost sm" onclick="go('home')">‹ Zurück</button><span class="tag ${p.src==='ki'?'ai':''}">${p.src==='ki'?'KI-Trainer':'Regel-Trainer'}</span></div>
   <h1 style="margin-top:6px">${esc(p.title||MODES[p.mode].t)}</h1>
   <div class="small muted" style="margin:-6px 0 12px">≈ <b class="${total>p.minutes+3?'warnc':''}">${total} min</b> von ${p.minutes} min · ${p.blocks.length} Stationen · Tippe auf eine Station zum Anpassen</div>`;
-  if(p.err)h+=`<div class="card warnbox small">KI-Trainer nicht erreichbar, Regel-Trainer genutzt. (${esc(p.err)})</div>`;
+  if(p.err)h+=`<div class="card warnbox small">KI-Trainer hat diesmal nicht geantwortet, darum plant der Regel-Trainer. Einfach „Neu vorschlagen“ tippen, um es nochmal zu versuchen. <span class="muted">(${esc(p.err)})</span></div>`;
   if(p.comment)h+=`<div class="card small">${esc(p.comment)}</div>`;
   h+=checkCard(p);
   h+=`<div class="card"><div class="row between"><div class="grow"><b>Aufwärmen</b><div class="muted small">${esc(p.warmup.text)}</div></div>${stepper(p.warmup.min+' min','wu(-1)','wu(1)')}</div></div>`;
@@ -435,7 +460,7 @@ async function aiCheck(){
   try{const p=S.draft;
     const plan={aufwaermen_min:p.warmup.min,stationen:p.blocks.map((b,i)=>({nr:i+1,art:b.kind,saetze:b.rounds,pause_s:b.rest,aufwaermsatz:!!b.warmupSet,uebungen:b.items.map(it=>({name:XX(it.exId).name,wdh:it.reps,kg:it.weight}))})),zeit_min:p.minutes};
     const user=`Der Kunde hat den Plan manuell angepasst. Kommentiere kurz und knapp (max. 3 Sätze, du-Form): Ist etwas wirklich suboptimal oder riskant? Wenn alles passt, sag das in einem Satz. Kein JSON, nur Text.\n\nPlan:\n${JSON.stringify(plan)}\n\nRegel-Check:\n${planCheck(p).map(x=>x.t).join('\n')||'keine Auffälligkeiten'}\n\nKontext:\n${JSON.stringify(trainerContext())}`;
-    p.aiCheck=(await askAI(TRAINER_SYS.replace(/Antworte ausschließlich mit gültigem JSON[^]*$/,'Antworte knapp in normalem Text.'),user,400)).trim();
+    p.aiCheck=(await askAI(TRAINER_SYS+'\nAntworte knapp in normalem Text.',user,400)).trim();
   }catch(e){toast('KI-Fehler: '+e.message);}
   ui.busy=false;save();render();
 }
@@ -643,8 +668,8 @@ async function aiReview(){
   if(ui.busy)return;ui.busy=true;render();
   try{
     const s=S.sessions.find(x=>x.id===S.summary.sid);
-    const user=`Werte das heutige Training aus und gib Empfehlungen fürs nächste Mal (Gewichte, Hinweise, worauf achten). Antworte nur mit JSON: {"text":"4–6 Sätze, du-Form, motivierend und konkret","vorschlaege":[{"exId":"ID","gewicht":42.5,"grund":"kurz"}]}\n\nHeutiges Training:\n${JSON.stringify(sessionForAI(s))}\n\nKontext:\n${JSON.stringify(trainerContext())}`;
-    const r=parseJSON(await askAI(TRAINER_SYS,user,1500));
+    const user=`Werte das heutige Training aus und gib Empfehlungen fürs nächste Mal (Gewichte, Hinweise, worauf achten). Übergib das Ergebnis mit dem Werkzeug auswertung_speichern.\n\nHeutiges Training:\n${JSON.stringify(sessionForAI(s))}\n\nKontext:\n${JSON.stringify(trainerContext())}`;
+    const r=await askAITool(TRAINER_SYS,user,'auswertung_speichern',REVIEW_TOOL_SCHEMA,1500);
     S.summary.ai={text:String(r.text||''),sugg:(r.vorschlaege||[]).filter(v=>v&&X(v.exId)&&isFinite(+v.gewicht)).map(v=>({exId:v.exId,to:+v.gewicht,reason:String(v.grund||'')}))};
   }catch(e){toast('KI-Fehler: '+e.message);}
   ui.busy=false;save();render();
@@ -728,7 +753,7 @@ function vSettings(){
   <button class="btn big" style="margin-top:12px" onclick="resetRx()">Trainer-Vorgaben neu laden</button>
   <p class="small muted">Setzt Sätze, Wdh.-Bereiche und Tipps deiner Startgeräte auf die Trainer-Werte zurück. Gewichte und Verlauf bleiben.</p>
   <button class="btn big danger" style="margin-top:4px" onclick="resetAll()">Alles zurücksetzen</button></div>
-  <p class="small muted center">Trainingscoach · Version 1.5</p>`;
+  <p class="small muted center">Trainingscoach · Version 1.6</p>`;
 }
 function saveSettings(){
   const g=id=>document.getElementById(id),st=S.settings;
