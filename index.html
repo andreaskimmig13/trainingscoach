@@ -133,17 +133,17 @@ function trainerOrder(e){const k=TRAINER_ORDER[(e.nr||'').trim()]??TRAINER_ORDER
   const firstCore=Math.min(...list.filter(x=>x.cat==='rumpf').map(x=>x.order||999),999);return firstCore-1;}
 /* Trainer-Vorgaben: Sätze × Wdh.-Bereich (doppelte Progression) + Ausführungstipp */
 const RX={
- '3028':{sets:2,reps:12,repsMax:15,cue:'Aufrecht sitzen, langsam öffnen, 2 s zurück – nicht zurückschnellen lassen.'},
+ '3028':{sets:2,reps:15,repsMax:20,wf:.9,cue:'Aufrecht sitzen, langsam öffnen, 2 s zurück – nicht zurückschnellen lassen.'},
  '3020':{sets:3,reps:10,repsMax:12,cue:'Brust raus, Stange zur oberen Brust, Schulterblätter aktiv nach unten ziehen.'},
- '3003':{sets:3,reps:10,repsMax:12,cue:'Becken fest ins Polster, kontrolliert beugen, 3 s zurück.'},
- '3002':{sets:3,reps:10,repsMax:12,cue:'Becken fest ins Polster, kontrolliert beugen, 3 s zurück.'},
+ '3003':{sets:3,reps:12,repsMax:15,wf:.9,cue:'Becken fest ins Polster, kontrolliert beugen, 3 s zurück.'},
+ '3002':{sets:3,reps:12,repsMax:15,wf:.9,cue:'Becken fest ins Polster, kontrolliert beugen, 3 s zurück.'},
  '3016':{sets:3,reps:10,repsMax:12,cue:'Griffe auf Brusthöhe, Schulterblätter zusammen, Ellbogen leicht unter Schulterhöhe.'},
  '3023':{sets:3,reps:10,repsMax:12,cue:'Schulterblätter fixiert, kontrolliert zurück, nicht abfedern.'},
- '3031':{sets:3,reps:10,repsMax:12,cue:'Knie zeigen über die Fußspitzen, oben nicht ganz durchstrecken, 3 s ablassen. Bei Knieschmerz Bewegung verkürzen.'},
+ '3031':{sets:3,reps:15,repsMax:20,wf:.8,cue:'Leichteres Gewicht, dafür gleichmäßig: Knie über die Fußspitzen, oben nicht ganz durchstrecken, 3 s ablassen. Bei Knieschmerz Bewegung verkürzen.'},
  '3040':{sets:3,reps:10,repsMax:12,cue:'Brust ans Polster, Ellbogen eng nach hinten, Schulterblätter zusammenziehen.'},
- '3001':{sets:3,reps:12,repsMax:15,cue:'Polster knapp über dem Fußgelenk, oben 1 s halten, 3 s ablassen. Leicht beginnen, schmerzfrei bleiben.'},
+ '3001':{sets:3,reps:15,repsMax:20,wf:.8,cue:'Polster knapp über dem Fußgelenk, oben 1 s halten, 3 s ablassen. Leicht beginnen, schmerzfrei bleiben.'},
  'schulterpresse':{sets:3,reps:10,repsMax:12,cue:'Rücken fest anlehnen, kein Hohlkreuz, Arme oben nicht ganz durchstrecken.'},
- '3029':{sets:2,reps:12,repsMax:15,cue:'Langsam schließen, kurz halten, kontrolliert öffnen.'},
+ '3029':{sets:2,reps:15,repsMax:20,wf:.9,cue:'Langsam schließen, kurz halten, kontrolliert öffnen.'},
  '3037':{sets:3,reps:12,repsMax:15,cue:'Beim Einrollen ausatmen, Bewegung aus dem Bauch, nicht mit den Armen ziehen.'},
  '3008':{sets:3,reps:12,repsMax:15,cue:'Langsam einrollen, unten nicht ablegen – Spannung halten.'},
  'rückenstrecker':{sets:3,reps:12,repsMax:15,cue:'Langsam aufrichten bis zur geraden Haltung, nicht überstrecken.'}
@@ -152,7 +152,7 @@ const rxOf=e=>RX[(e.nr||'').trim()]||RX[(e.name||'').trim().toLowerCase()];
 function applyRx(e){const r=rxOf(e);if(r){e.sets=r.sets;e.reps=r.reps;e.repsMax=r.repsMax;e.cue=r.cue;}return !!r;}
 const repStr=e=>(e.repsMax&&e.repsMax>e.reps)?`${e.reps}–${e.repsMax}`:String(e.reps);
 function parseRange(s){const m=String(s).match(/(\d+)\D+(\d+)/);if(m)return [+m[1],+m[2]];const n=parseInt(s);return isNaN(n)?null:[n,n];}
-function migrate(s){s.settings=Object.assign(defaultSettings(),s.settings||{});s.sessions=s.sessions||[];s.exercises.forEach(e=>{e.hist=e.hist||[];if(typeof e.order!=='number')e.order=trainerOrder(e);if(!s.rx)applyRx(e);if(!e.repsMax)e.repsMax=e.reps;if(e.cue===undefined)e.cue='';});s.rx=1;return s;}
+function migrate(s){s.settings=Object.assign(defaultSettings(),s.settings||{});s.sessions=s.sessions||[];s.exercises.forEach(e=>{e.hist=e.hist||[];if(typeof e.order!=='number')e.order=trainerOrder(e);if(!s.rx)applyRx(e);if((s.rx||0)<2){const r=rxOf(e);if(r&&r.wf){applyRx(e);const st=s.settings.step||2.5;e.weight=Math.round(e.weight*r.wf/st)*st;}}if(!e.repsMax)e.repsMax=e.reps;if(e.cue===undefined)e.cue='';});s.rx=2;return s;}
 function load(){try{const s=JSON.parse(localStorage.getItem(STORE));if(s&&Array.isArray(s.exercises))return migrate(s);}catch(e){}return migrate(seed());}
 let S=load();save();
 function save(){try{localStorage.setItem(STORE,JSON.stringify(S));}catch(e){toast('Speichern fehlgeschlagen');}}
@@ -174,7 +174,7 @@ function toast(m){const t=document.getElementById('toast');t.textContent=m;t.cla
 function stepper(val,minus,plus,cls='',valClick=''){return `<div class="stepper ${cls}"><button onclick="event.stopPropagation();${minus}">−</button><span class="val" ${valClick?`onclick="event.stopPropagation();${valClick}"`:''}>${val}</span><button onclick="event.stopPropagation();${plus}">+</button></div>`;}
 
 /* ================= Regel-Trainer ================= */
-function restFor(e){if(e.rest)return e.rest;if(e.cat==='rumpf')return 45;if(e.type==='iso')return 60;return (+e.reps<=8)?120:90;}
+function restFor(e){if(e.rest)return e.rest;if(e.cat==='rumpf')return 45;if(e.type==='iso')return 60;if(e.knee&&+e.reps>=15)return 75;return (+e.reps<=8)?120:90;}
 function single(e){return {kind:'single',rounds:e.sets,rest:restFor(e),restIn:0,items:[{exId:e.id,reps:repStr(e),weight:e.weight,hint:''}]};}
 function blockSec(b){const n=b.items.length;return b.rounds*n*40+b.rounds*(n-1)*(b.restIn||0)+(b.rounds-1)*b.rest+45+(b.warmupSet?100:0);}
 function planSec(p){return p.warmup.min*60+p.blocks.reduce((s,b)=>s+blockSec(b),0);}
@@ -217,7 +217,7 @@ function rulePlan(mode,minutes){
   if(mode==='variation'){
     shuffle(blocks.filter(b=>!painful(XX(b.items[0].exId).note))).slice(0,2).forEach(b=>{
       const e=XX(b.items[0].exId),it=b.items[0];
-      if(e.knee||e.cat==='rumpf'||Math.random()<.5){b.rounds=2;it.reps='15';it.weight=roundW(e.weight*.85);b.rest=Math.max(45,restFor(e)-15);it.hint='Leichter, dafür sauber und kontrolliert';notes.push(`${e.name}: 2×15 leichter`);}
+      if(e.knee||e.cat==='rumpf'||Math.random()<.5){b.rounds=2;it.reps=e.knee?'20':'15';it.weight=roundW(e.weight*.85);b.rest=Math.max(45,restFor(e)-15);it.hint='Leichter, dafür sauber und kontrolliert';notes.push(`${e.name}: 2×${it.reps} leichter`);}
       else{b.rounds=4;it.reps='8';it.weight=roundW(e.weight*1.05);b.rest=restFor(e)+15;it.hint='Etwas schwerer, saubere Technik vor Gewicht';notes.push(`${e.name}: 4×8 etwas schwerer`);}
     });
   }
@@ -253,7 +253,7 @@ function freestyle(bl,notes){
 const TRAINER_SYS=`Du bist ein erfahrener, umsichtiger Fitnesstrainer mit physiotherapeutischem Hintergrund. Dein Kunde trainiert einmal pro Woche 50–80 Minuten an Geräten (gym80). Ziele: allgemeine Fitness, leichter Muskelaufbau, kräftigerer Oberkörper, flacherer Bauch. Vorgeschichte: Knieprobleme (v. a. rechts) – Kniekräftigung ist wichtig, soll aber nicht dominieren.
 Feste Regeln:
 - Immer Aufwärmen zu Beginn.
-- Mindestens zwei Übungen mit knie_fokus=true pro Einheit. Übungen mit knie_fokus nie schwerer als das aktuelle Gewicht, wenn die letzte Notiz auf Schmerzen hindeutet.
+- Mindestens zwei Übungen mit knie_fokus=true pro Einheit. Übungen mit knie_fokus bewusst mit höheren Wiederholungen (15–20) und moderatem Gewicht – nie schwere, niedrige Wiederholungsbereiche fürs Knie, und nie schwerer als das aktuelle Gewicht, wenn die letzte Notiz auf Schmerzen hindeutet.
 - Sanfter Einstieg: Nach dem Aufwärmen zuerst gelenkschonende Übungen (Hüfte, Beinbeuger, Oberkörper-Zug). Die Beinpresse (schwere Mehrgelenk-Beinübung) frühestens als 3. Station und mit warmupSet=true (ein leichter Aufwärmsatz vorweg).
 - Ober- und Unterkörper abwechseln, Rumpf am Ende. Orientiere dich an standard_reihenfolge (vom Trainer festgelegt) und begründe Abweichungen.
 - Basis sind die Trainer-Vorgaben (standard = Sätze x Wdh.-Bereich, doppelte Progression). reps darf ein Bereich wie "10–12" sein.
@@ -655,7 +655,7 @@ function vSettings(){
   <button class="btn big" style="margin-top:12px" onclick="resetRx()">Trainer-Vorgaben neu laden</button>
   <p class="small muted">Setzt Sätze, Wdh.-Bereiche und Tipps deiner Startgeräte auf die Trainer-Werte zurück. Gewichte und Verlauf bleiben.</p>
   <button class="btn big danger" style="margin-top:4px" onclick="resetAll()">Alles zurücksetzen</button></div>
-  <p class="small muted center">Trainingscoach · Version 1.2</p>`;
+  <p class="small muted center">Trainingscoach · Version 1.3</p>`;
 }
 function saveSettings(){
   const g=id=>document.getElementById(id),st=S.settings;
