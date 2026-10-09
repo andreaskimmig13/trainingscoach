@@ -106,7 +106,7 @@ const MODELS=[['claude-sonnet-5-5','Sonnet 5.5 (empfohlen)'],['claude-haiku-5-5'
 
 function defaultSettings(){return {apiKey:'',model:'claude-sonnet-5-5',warmup:8,warmupText:'Rad oder Crosstrainer, locker steigernd',step:2.5};}
 function seed(){
-  const e=(name,nr,cat,type,group,sets,reps,weight,start,o={})=>({id:uid(),name,nr,cat,type,group,sets,reps,weight,startWeight:start,knee:!!o.knee,prio:o.prio||2,rest:null,note:o.note||'',active:true,hist:[]});
+  const e=(name,nr,cat,type,group,sets,reps,weight,start,o={})=>({id:uid(),name,nr,cat,type,group,sets,reps,weight,startWeight:start,knee:!!o.knee,prio:o.prio||2,rest:null,note:o.note||'',active:true,hist:[],order:trainerOrder({name,nr,cat})});
   return {v:1,settings:defaultSettings(),sessions:[],active:null,draft:null,summary:null,exercises:[
     e('Beindrücken','3031','beine','mehr','Oberschenkel vorne',3,10,69,77,{knee:true,prio:1,note:'Rechtes Knie: Schmerzen nach 2. Durchgang mit 85 kg'}),
     e('Beinstrecker','3001','beine','iso','Oberschenkel vorne',3,10,30,30,{knee:true,prio:1}),
@@ -124,12 +124,19 @@ function seed(){
     e('Rückenstrecker','','rumpf','iso','Rückenstrecker',3,12,50,35,{prio:1})
   ]};
 }
-function migrate(s){s.settings=Object.assign(defaultSettings(),s.settings||{});s.sessions=s.sessions||[];s.exercises.forEach(e=>{e.hist=e.hist||[];});return s;}
+/* Trainer-Reihenfolge: sanfter Einstieg (Hüfte, Oberkörper-Zug, Beinbeuger), Beinpresse erst als 5. Station,
+   Ober-/Unterkörper im Wechsel, Rumpf am Ende. Alternativen liegen direkt neben ihrem Partner. */
+const TRAINER_ORDER={'3028':10,'3020':20,'3003':30,'3002':31,'3016':40,'3023':41,'3031':50,'3040':60,'3001':70,'schulterpresse':80,'3029':90,'3037':100,'3008':101,'rückenstrecker':110};
+function trainerOrder(e){const k=TRAINER_ORDER[(e.nr||'').trim()]??TRAINER_ORDER[(e.name||'').trim().toLowerCase()];if(k!==undefined)return k;
+  let list=[];try{list=S.exercises||[];}catch(_){}const ord=list.map(x=>x.order||0);
+  if(e.cat==='rumpf')return Math.max(110,...ord)+10;
+  const firstCore=Math.min(...list.filter(x=>x.cat==='rumpf').map(x=>x.order||999),999);return firstCore-1;}
+function migrate(s){s.settings=Object.assign(defaultSettings(),s.settings||{});s.sessions=s.sessions||[];s.exercises.forEach(e=>{e.hist=e.hist||[];if(typeof e.order!=='number')e.order=trainerOrder(e);});return s;}
 function load(){try{const s=JSON.parse(localStorage.getItem(STORE));if(s&&Array.isArray(s.exercises))return migrate(s);}catch(e){}return seed();}
 let S=load();
 function save(){try{localStorage.setItem(STORE,JSON.stringify(S));}catch(e){toast('Speichern fehlgeschlagen');}}
 const X=id=>S.exercises.find(e=>e.id===id);
-const XX=id=>X(id)||{id,name:'(gelöschtes Gerät)',nr:'',cat:'rumpf',type:'iso',group:'',sets:3,reps:10,weight:0,knee:false,prio:3,note:'',hist:[]};
+const XX=id=>X(id)||{id,name:'(gelöschtes Gerät)',nr:'',cat:'rumpf',type:'iso',group:'',sets:3,reps:10,weight:0,knee:false,prio:3,note:'',hist:[],order:999};
 
 /* ================= Helfer ================= */
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -148,7 +155,7 @@ function stepper(val,minus,plus,cls='',valClick=''){return `<div class="stepper 
 /* ================= Regel-Trainer ================= */
 function restFor(e){if(e.rest)return e.rest;if(e.cat==='rumpf')return 45;if(e.type==='iso')return 60;return (+e.reps<=8)?120:90;}
 function single(e){return {kind:'single',rounds:e.sets,rest:restFor(e),restIn:0,items:[{exId:e.id,reps:String(e.reps),weight:e.weight,hint:''}]};}
-function blockSec(b){const n=b.items.length;return b.rounds*n*40+b.rounds*(n-1)*(b.restIn||0)+(b.rounds-1)*b.rest+45;}
+function blockSec(b){const n=b.items.length;return b.rounds*n*40+b.rounds*(n-1)*(b.restIn||0)+(b.rounds-1)*b.rest+45+(b.warmupSet?100:0);}
 function planSec(p){return p.warmup.min*60+p.blocks.reduce((s,b)=>s+blockSec(b),0);}
 const prioOf=e=>e.prio*10-(e.knee?1:0);
 const catOf=b=>XX(b.items[0].exId).cat;
@@ -165,14 +172,18 @@ function orderBlocks(bl,pushFirst){
   return out.concat(R);
 }
 
+const byOrder=(a,b)=>XX(a.items[0].exId).order-XX(b.items[0].exId).order;
+/* Sanfter Einstieg: schwere Mehrgelenk-Beinübung nie als 1. oder 2. Station */
+function gentleStart(bl){const i=bl.findIndex(b=>catOf(b)==='beine'&&isCompound(b));const t=Math.min(2,bl.length-1);
+  if(i>=0&&i<t){const [b]=bl.splice(i,1);bl.splice(t,0,b);}return bl;}
 function rulePlan(mode,minutes){
   const act=S.exercises.filter(e=>e.active);
   const notes=[];
-  const picks=groupsOf(act).map(g=>({g,e:g[0]}));const swapped=new Set();
+  const picks=groupsOf(act).map(g=>({g,e:g[0]}));const swapped=new Set(),slot=new Map();
   if(mode!=='standard'){
     shuffle(picks.filter(p=>p.g.length>1)).slice(0,mode==='frei'?3:2).forEach(p=>{
       const o=p.g.filter(x=>x!==p.e);const n=o[Math.floor(Math.random()*o.length)];
-      notes.push(`${n.name}${n.nr?' ('+n.nr+')':''} statt ${p.e.name}`);swapped.add(p.e.id);p.e=n;});
+      notes.push(`${n.name}${n.nr?' ('+n.nr+')':''} statt ${p.e.name}`);swapped.add(p.e.id);slot.set(n.id,p.e.order);p.e=n;});
   }
   const gPrio=p=>Math.min(...p.g.map(prioOf));
   picks.sort((a,b)=>gPrio(a)-gPrio(b));
@@ -189,8 +200,11 @@ function rulePlan(mode,minutes){
       else{b.rounds=4;it.reps='8';it.weight=roundW(e.weight*1.05);b.rest=restFor(e)+15;it.hint='Etwas schwerer, saubere Technik vor Gewicht';notes.push(`${e.name}: 4×8 etwas schwerer`);}
     });
   }
-  blocks=orderBlocks(blocks,mode!=='standard'&&Math.random()<.5);
+  const so=b=>{const id=b.items[0].exId;return slot.has(id)?slot.get(id):XX(id).order;};
+  blocks.sort((a,b)=>so(a)-so(b));
   if(mode==='frei')blocks=freestyle(blocks,notes);
+  blocks=gentleStart(blocks);
+  blocks.forEach(b=>{if(b.kind==='single'&&catOf(b)==='beine'&&isCompound(b))b.warmupSet=true;});
   return {title:MODES[mode].t,comment:notes.join(' · '),warmup:{min:S.settings.warmup,text:S.settings.warmupText},blocks};
 }
 
@@ -201,8 +215,8 @@ function freestyle(bl,notes){
   const push=bl.filter(b=>catOf(b)==='druecken'),pull=bl.filter(b=>catOf(b)==='ziehen');
   const core=bl.filter(b=>catOf(b)==='rumpf');
   legsC.forEach(b=>{const e=XX(b.items[0].exId);b.items[0].hint=e.knee?'Tempo: 3 s langsam ablassen, Knie nicht ganz durchstrecken':'Pyramide: Gewicht pro Satz leicht steigern';});
-  const lower=[...legsC];
-  for(let i=0;i<legsI.length;i+=2)lower.push(legsI[i+1]?ss(legsI[i],legsI[i+1]):legsI[i]);
+  const iso=[];for(let i=0;i<legsI.length;i+=2)iso.push(legsI[i+1]?ss(legsI[i],legsI[i+1]):legsI[i]);
+  const lower=iso.length?[iso[0],...legsC,...iso.slice(1)]:[...legsC];
   const upper=[];
   while(push.length&&pull.length)upper.push(ss(pull.shift(),push.shift()));
   upper.push(...pull,...push);
@@ -219,7 +233,8 @@ const TRAINER_SYS=`Du bist ein erfahrener, umsichtiger Fitnesstrainer mit physio
 Feste Regeln:
 - Immer Aufwärmen zu Beginn.
 - Mindestens zwei Übungen mit knie_fokus=true pro Einheit. Übungen mit knie_fokus nie schwerer als das aktuelle Gewicht, wenn die letzte Notiz auf Schmerzen hindeutet.
-- Große Mehrgelenkübungen früh, Ober- und Unterkörper abwechseln, Rumpf eher am Ende.
+- Sanfter Einstieg: Nach dem Aufwärmen zuerst gelenkschonende Übungen (Hüfte, Beinbeuger, Oberkörper-Zug). Die Beinpresse (schwere Mehrgelenk-Beinübung) frühestens als 3. Station und mit warmupSet=true (ein leichter Aufwärmsatz vorweg).
+- Ober- und Unterkörper abwechseln, Rumpf am Ende. Orientiere dich an standard_reihenfolge (vom Trainer festgelegt) und begründe Abweichungen.
 - Pausen in Sekunden legst du passend zu Übung und Satzschema fest (rest = nach jedem Satz bzw. jeder Runde, restIn = zwischen Geräten innerhalb eines Supersatzes/Zirkels).
 - Zeitbudget einhalten: Schätzung 40 s pro Satz + Pausen + 45 s Gerätewechsel pro Station + Aufwärmen.
 - Verwende ausschließlich Geräte-IDs aus der Liste.
@@ -228,7 +243,7 @@ const MODE_AI={
   variation:'Basis ist das Standardprogramm. Tausche 2–3 Übungen gegen Alternativen (gleiche Gruppe oder Kategorie) und variiere bei 1–2 Übungen Satzschema oder Tempo. Bleib nah am Bewährten.',
   frei:'Volle Freiheit: Plane die Einheit neu. Nutze gern Supersätze, Zirkel, Pyramiden oder Tempovorgaben (als kurzer hint). Abwechslungsreich, aber sicher und zielgerichtet.'
 };
-const PLAN_SCHEMA=`{"title":"kurzer Name","comment":"2–3 Sätze Begründung, du-Form","warmup":{"min":8,"text":"…"},"blocks":[{"kind":"single|superset|zirkel","rounds":3,"rest":90,"restIn":0,"items":[{"exId":"ID","reps":"10","weight":40,"hint":"optional"}]}]}`;
+const PLAN_SCHEMA=`{"title":"kurzer Name","comment":"2–3 Sätze Begründung, du-Form","warmup":{"min":8,"text":"…"},"blocks":[{"kind":"single|superset|zirkel","rounds":3,"rest":90,"restIn":0,"warmupSet":false,"items":[{"exId":"ID","reps":"10","weight":40,"hint":"optional"}]}]}`;
 
 async function askAI(system,user,maxTokens){
   const st=S.settings;if(!st.apiKey)throw new Error('Kein API-Schlüssel');
@@ -240,11 +255,12 @@ async function askAI(system,user,maxTokens){
 function parseJSON(t){const m=String(t).match(/\{[\s\S]*\}/);return JSON.parse(m?m[0]:t);}
 function trainerContext(){
   return {geraete:S.exercises.filter(e=>e.active).map(e=>({id:e.id,name:e.name,nr:e.nr,kategorie:CATS[e.cat],typ:TYPES[e.type],knie_fokus:e.knee,prioritaet:PRIOS[e.prio],gruppe:e.group,standard:`${e.sets}x${e.reps}`,gewicht_kg:e.weight,start_kg:e.startWeight,letzte_notiz:e.note})),
+    standard_reihenfolge:S.exercises.filter(e=>e.active).sort((a,b)=>a.order-b.order).map(e=>e.name+(e.nr?' '+e.nr:'')),
     letzte_trainings:S.sessions.slice(0,4).map(sessionForAI)};
 }
 function sessionForAI(s){return {datum:s.date.slice(0,10),modus:s.mode,dauer_min:s.min,uebungen:s.entries.map(x=>({id:x.exId,name:x.name,ziel_wdh:x.target,saetze:x.sets.map(z=>z.w+'kg x '+z.reps).join(', '),notiz:x.note}))};}
 function validatePlan(p){
-  const blocks=(p.blocks||[]).map(b=>({kind:['single','superset','zirkel'].includes(b.kind)?b.kind:'single',rounds:clamp(parseInt(b.rounds)||3,1,8),rest:clamp(parseInt(b.rest)||90,15,300),restIn:clamp(parseInt(b.restIn)||0,0,120),
+  const blocks=(p.blocks||[]).map(b=>({warmupSet:b.warmupSet===true,kind:['single','superset','zirkel'].includes(b.kind)?b.kind:'single',rounds:clamp(parseInt(b.rounds)||3,1,8),rest:clamp(parseInt(b.rest)||90,15,300),restIn:clamp(parseInt(b.restIn)||0,0,120),
     items:(b.items||[]).filter(i=>i&&X(i.exId)).map(i=>({exId:i.exId,reps:String(i.reps??X(i.exId).reps),weight:isFinite(+i.weight)&&i.weight!==null?+i.weight:X(i.exId).weight,hint:String(i.hint||'').slice(0,140)}))})).filter(b=>b.items.length);
   blocks.forEach(b=>{if(b.items.length===1)b.kind='single';else if(b.kind==='single')b.kind='superset';if(b.kind!=='single'&&!b.restIn)b.restIn=20;});
   if(!blocks.length)throw new Error('Plan war leer');
@@ -321,12 +337,12 @@ function blockCard(b,bi){
     <div class="small muted">${multi?'':b.rounds+' × '}${esc(it.reps)} Wdh · ${fmtW(it.weight)}${it.hint?' · '+esc(it.hint):''}</div></div>
     ${open?`<button class="btn sm" onclick="event.stopPropagation();replaceItem(${bi},${ii})">Ersetzen</button>`:''}</div>
     ${open?`<div class="edit" onclick="event.stopPropagation()"><div class="row between"><span>Wiederholungen</span>${isNaN(parseInt(it.reps))?`<b>${esc(it.reps)}</b>`:stepper(esc(it.reps),`iset(${bi},${ii},'reps',-1)`,`iset(${bi},${ii},'reps',1)`)}</div><div class="row between"><span>Gewicht</span>${stepper(fmtW(it.weight),`iset(${bi},${ii},'weight',-1)`,`iset(${bi},${ii},'weight',1)`,'',`iweight(${bi},${ii})`)}</div></div>`:''}</div>`;}).join('');
-  const restLine=multi?`${b.rounds} Runden · ${b.restIn} s zwischen Geräten · ${b.rest} s nach jeder Runde`:`Pause ${b.rest} s`;
+  const restLine=(multi?`${b.rounds} Runden · ${b.restIn} s zwischen Geräten · ${b.rest} s nach jeder Runde`:`Pause ${b.rest} s`)+(b.warmupSet&&!multi?' · vorher 1 Aufwärmsatz':'');
   let h=`<div class="card block ${open?'open':''}" onclick="toggleEdit(${bi})"><div class="row between small muted" style="margin-bottom:6px"><span>${bi+1}. Station${multi?' · <span class="tag">'+(b.kind==='superset'?'Supersatz':'Zirkel')+'</span>':''}</span><span>≈ ${Math.round(blockSec(b)/60)} min</span></div>${items}<div class="small muted" style="margin-top:8px">⏱ ${restLine}</div>`;
   if(open)h+=`<div class="edit" onclick="event.stopPropagation()">
     <div class="row between"><span>${multi?'Runden':'Sätze'}</span>${stepper(b.rounds,`bset(${bi},'rounds',-1)`,`bset(${bi},'rounds',1)`)}</div>
     <div class="row between"><span>Pause${multi?' nach Runde':''}</span>${stepper(b.rest+' s',`bset(${bi},'rest',-15)`,`bset(${bi},'rest',15)`)}</div>
-    ${multi?`<div class="row between"><span>Pause zw. Geräten</span>${stepper(b.restIn+' s',`bset(${bi},'restIn',-5)`,`bset(${bi},'restIn',5)`)}</div>`:''}
+    ${multi?`<div class="row between"><span>Pause zw. Geräten</span>${stepper(b.restIn+' s',`bset(${bi},'restIn',-5)`,`bset(${bi},'restIn',5)`)}</div>`:`<label class="row between"><span>Aufwärmsatz vorweg (≈60 %)</span><input type="checkbox" ${b.warmupSet?'checked':''} onchange="S.draft.blocks[${bi}].warmupSet=this.checked;save();render()"></label>`}
     <div class="row wrap" style="gap:8px"><button class="btn sm" onclick="moveBlock(${bi},-1)">↑ Hoch</button><button class="btn sm" onclick="moveBlock(${bi},1)">↓ Runter</button>${multi?`<button class="btn sm" onclick="splitBlock(${bi})">Einzeln machen</button>`:''}<button class="btn sm danger" onclick="removeBlock(${bi})">Entfernen</button></div></div>`;
   return h+'</div>';
 }
@@ -368,7 +384,8 @@ function addToPlan(){
 
 /* ================= Training durchführen ================= */
 let timerInt=null,lastBeep=-1;
-function buildSteps(p){const s=[];if(p.warmup.min>0)s.push({t:'warm'});p.blocks.forEach((b,bi)=>{for(let r=0;r<b.rounds;r++)b.items.forEach((it,ii)=>s.push({t:'set',b:bi,i:ii,r}));});return s;}
+function buildSteps(p){const s=[];if(p.warmup.min>0)s.push({t:'warm'});p.blocks.forEach((b,bi)=>{if(b.warmupSet&&b.kind==='single')s.push({t:'set',b:bi,i:0,r:-1,ws:true});for(let r=0;r<b.rounds;r++)b.items.forEach((it,ii)=>s.push({t:'set',b:bi,i:ii,r}));});return s;}
+const wsWeight=w=>roundW(w*.6);
 function startSession(){
   if(!S.draft||!S.draft.blocks.length)return toast('Der Plan ist leer');
   unlockAudio();
@@ -408,6 +425,12 @@ function warmView(a){
 }
 function setView(){
   const {a,st,b,it}=cur(),e=XX(it.exId),L=logFor(st,it,b);
+  if(st.ws)return `<div class="muted small">${e.nr?'Gerät-Nr. '+esc(e.nr):''}</div><h1 class="ex-title">${esc(e.name)}</h1><div class="setno">Aufwärmsatz</div>
+  <div class="card"><div class="row between"><span class="muted">Gewicht (ca. 60 %)</span><b style="font-size:24px">${fmtW(wsWeight(it.weight))}</b></div><div class="row between" style="margin-top:12px"><span class="muted">Wdh.</span><b style="font-size:24px">15</b></div></div>
+  <div class="card small">💡 Locker und langsam, Gelenk an die Bewegung gewöhnen. Zählt nicht als Arbeitssatz.</div>
+  ${e.note?`<div class="card small"><span class="muted">Notiz vom letzten Mal:</span> ${esc(e.note)}</div>`:''}
+  <button class="btn primary huge" onclick="setDone()">✓ Aufwärmsatz fertig</button>
+  <div class="row" style="gap:8px;margin-top:12px"><button class="btn grow sm" onclick="later()">Belegt → später</button><button class="btn grow sm" onclick="replaceInSession()">Ersetzen</button><button class="btn grow sm" onclick="skipWarmupSet()">Ohne Aufwärmsatz</button></div>`;
   const tgt=parseInt(it.reps),reps=ui.reps??(isNaN(tgt)?null:tgt),multi=b.kind!=='single';
   return `<div class="muted small">${multi?(b.kind==='superset'?'Supersatz':'Zirkel')+' · Gerät '+(st.i+1)+' von '+b.items.length+' · ':''}${e.nr?'Gerät-Nr. '+esc(e.nr):''}</div>
   <h1 class="ex-title">${esc(e.name)}</h1>
@@ -427,7 +450,7 @@ function restView(a){
   return `<div class="muted small center">Pause</div>${ring(left,a.restTotal)}
   <div class="row" style="gap:8px"><button class="btn grow" onclick="restAdd(-15)">−15 s</button><button class="btn grow" onclick="restAdd(15)">+15 s</button></div>
   <div class="card next" style="margin-top:12px"><div class="muted small">Als Nächstes${newStation?' · Gerät wechseln':''}</div><b>${esc(e.name)}</b> <span class="muted">${e.nr?'#'+esc(e.nr):''}</span>
-  <div>${b.kind==='single'?'Satz':'Runde'} ${st.r+1} von ${b.rounds} · ${esc(it.reps)} Wdh · ${fmtW(it.weight)}</div>${newStation&&e.note?`<div class="small muted" style="margin-top:6px">Notiz: ${esc(e.note)}</div>`:''}</div>
+  <div>${st.ws?'Aufwärmsatz · 15 Wdh · '+fmtW(wsWeight(it.weight)):(b.kind==='single'?'Satz':'Runde')+' '+(st.r+1)+' von '+b.rounds+' · '+esc(it.reps)+' Wdh · '+fmtW(it.weight)}</div>${newStation&&e.note?`<div class="small muted" style="margin-top:6px">Notiz: ${esc(e.note)}</div>`:''}</div>
   <button class="btn primary big" onclick="restSkip()">Pause beenden</button>`;
 }
 function tick(){
@@ -443,14 +466,15 @@ function tick(){
 }
 function setDone(){
   unlockAudio();
-  const {a,st,b,it}=cur(),L=logFor(st,it,b),tgt=parseInt(it.reps);
-  L.sets.push({w:+it.weight,reps:ui.reps??(isNaN(tgt)?it.reps:tgt)});ui.reps=null;
+  const {a,st,b,it}=cur(),tgt=parseInt(it.reps);
+  if(!st.ws)logFor(st,it,b).sets.push({w:+it.weight,reps:ui.reps??(isNaN(tgt)?it.reps:tgt)});ui.reps=null;
   const next=a.steps[a.idx+1];a.idx++;
   if(!next){finish();return;}
-  const rest=(next.b===st.b&&next.r===st.r)?(b.restIn||0):b.rest;
+  const rest=st.ws?60:(next.b===st.b&&next.r===st.r)?(b.restIn||0):b.rest;
   if(rest>0){a.phase='rest';a.restTotal=rest;a.endsAt=Date.now()+rest*1000;lastBeep=-1;save();render();window.scrollTo(0,0);}
   else if(enterStep()){save();render();}
 }
+function skipWarmupSet(){const a=S.active;a.steps.splice(a.idx,1);if(enterStep()){save();render();}}
 function warmDone(){const a=S.active;a.idx++;if(enterStep()){save();render();}}
 function restSkip(){if(enterStep()){save();render();}}
 function restAdd(d){const a=S.active;a.endsAt+=d*1000;a.restTotal=Math.max(1,a.restTotal+d);save();tick();}
@@ -531,7 +555,7 @@ async function aiReview(){
 
 /* ================= Geräte ================= */
 function vDevices(){
-  let h=`<div class="row between"><h1 style="margin:4px 0">Geräte</h1><button class="btn primary sm" onclick="editEx()">+ Neues Gerät</button></div><p class="muted small">Gleiche „Gruppe“ = Alternativen, die sich gegenseitig ersetzen können.</p>`;
+  let h=`<div class="row between"><h1 style="margin:4px 0">Geräte</h1><button class="btn primary sm" onclick="editEx()">+ Neues Gerät</button></div><p class="muted small">Gleiche „Gruppe“ = Alternativen, die sich gegenseitig ersetzen können.</p><button class="btn big" onclick="orderSheet()">⇅ Reihenfolge im Training</button>`;
   Object.entries(CATS).forEach(([k,t])=>{const list=S.exercises.filter(e=>e.cat===k);if(!list.length)return;
     h+=`<h2>${t}</h2>`+list.map(e=>`<button class="pick ${e.active?'':'dim'}" onclick="editEx('${e.id}')"><div class="row between"><b>${esc(e.name)} <span class="muted small">${e.nr?'#'+esc(e.nr):''}</span></b><span>${fmtW(e.weight)}</span></div><div class="small muted">${e.sets}×${e.reps} · ${TYPES[e.type]}${e.group?' · '+esc(e.group):''} ${e.knee?'<span class="tag knee">Knie</span>':''} ${e.active?'':'<span class="tag">inaktiv</span>'}</div></button>`).join('');});
   return h;
@@ -557,12 +581,22 @@ function editEx(id){
 function saveEx(id){
   const v=k=>document.getElementById('f_'+k);const name=v('name').value.trim();if(!name)return toast('Bitte einen Namen eingeben');
   let e=id?X(id):null;const isNew=!e;
-  if(isNew){e={id:uid(),hist:[],startWeight:null};S.exercises.push(e);}
+  if(isNew){e={id:uid(),hist:[],startWeight:null,order:0};S.exercises.push(e);}
   const w=parseFloat(v('w').value.replace(',','.'))||0;
   Object.assign(e,{name,nr:v('nr').value.trim(),cat:v('cat').value,type:v('type').value,group:v('group').value.trim(),sets:clamp(parseInt(v('sets').value)||3,1,8),reps:clamp(parseInt(v('reps').value)||10,1,50),weight:w,prio:+v('prio').value,rest:parseInt(v('rest').value)?clamp(parseInt(v('rest').value),15,300):null,knee:v('knee').checked,active:v('active').checked,note:v('note').value.trim()});
   if(e.startWeight===null)e.startWeight=w;
+  if(isNew){e.order=0;e.order=trainerOrder(e);}
   save();closeSheet();render();toast(isNew?name+' angelegt':'Gespeichert');
 }
+function orderSheet(){
+  const list=S.exercises.slice().sort((a,b)=>a.order-b.order);
+  openSheet(`<div class="row between"><h1 style="margin:0">Reihenfolge</h1><button class="btn sm" onclick="closeSheet()">Fertig</button></div>
+  <p class="small muted">So ordnet der Trainer deine Übungen im Standard und in der Variation. Alternativen stehen direkt neben ihrem Partner und übernehmen dessen Platz. Die Beinpresse kommt nie als 1. oder 2. Station.</p>
+  ${list.map((e,i)=>`<div class="pick row ${e.active?'':'dim'}" style="gap:8px"><span class="muted small" style="width:22px">${i+1}.</span><div class="grow"><b>${esc(e.name)}</b> <span class="muted small">${e.nr?'#'+esc(e.nr):''}</span><div class="small muted">${CATS[e.cat]}${e.group?' · '+esc(e.group):''}</div></div><div class="stepper"><button onclick="moveOrder('${e.id}',-1)">↑</button><button onclick="moveOrder('${e.id}',1)">↓</button></div></div>`).join('')}
+  <button class="btn big" style="margin-top:8px" onclick="resetOrder()">Trainer-Reihenfolge wiederherstellen</button>`);
+}
+function moveOrder(id,d){const l=S.exercises.slice().sort((a,b)=>a.order-b.order),i=l.findIndex(e=>e.id===id),j=i+d;if(j<0||j>=l.length)return;[l[i],l[j]]=[l[j],l[i]];l.forEach((e,k)=>e.order=(k+1)*10);save();const y=document.getElementById('sheetBody').scrollTop;orderSheet();document.getElementById('sheetBody').scrollTop=y;}
+function resetOrder(){S.exercises.forEach(e=>{const k=TRAINER_ORDER[(e.nr||'').trim()]??TRAINER_ORDER[(e.name||'').trim().toLowerCase()];if(k!==undefined)e.order=k;});S.exercises.filter(e=>TRAINER_ORDER[(e.nr||'').trim()]===undefined&&TRAINER_ORDER[(e.name||'').trim().toLowerCase()]===undefined).forEach(e=>e.order=trainerOrder(e));save();orderSheet();toast('Trainer-Reihenfolge wiederhergestellt');}
 function delEx(id){const e=X(id);if(!confirm(e.name+' wirklich löschen? Der Verlauf bleibt erhalten.'))return;S.exercises=S.exercises.filter(x=>x.id!==id);save();closeSheet();render();}
 
 /* ================= Verlauf ================= */
@@ -590,7 +624,7 @@ function vSettings(){
   <div class="row wrap" style="gap:8px"><button class="btn grow" onclick="exportData()">Backup speichern</button><button class="btn grow" onclick="document.getElementById('imp').click()">Backup laden</button></div>
   <input type="file" id="imp" accept="application/json,.json" style="display:none" onchange="importData(this.files[0])">
   <button class="btn big danger" style="margin-top:12px" onclick="resetAll()">Alles zurücksetzen</button></div>
-  <p class="small muted center">Trainingscoach · Version 1.0</p>`;
+  <p class="small muted center">Trainingscoach · Version 1.1</p>`;
 }
 function saveSettings(){
   const g=id=>document.getElementById(id),st=S.settings;
