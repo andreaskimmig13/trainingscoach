@@ -322,8 +322,18 @@ function renderTabs(){
 }
 
 /* ================= Start ================= */
+let installEvt=null;
+const isStandalone=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone===true;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installEvt=e;if(ui.view==='home')render();});
+window.addEventListener('appinstalled',()=>{installEvt=null;toast('App installiert – du findest sie auf dem Startbildschirm');render();});
+async function doInstall(){if(!installEvt)return;installEvt.prompt();try{await installEvt.userChoice;}catch(e){}installEvt=null;render();}
+function installCard(){
+  if(isStandalone()||location.protocol==='file:')return '';
+  if(installEvt)return `<div class="card hl"><b>Als App installieren</b><div class="muted small">Dann startet der Trainingscoach wie eine normale App vom Startbildschirm – ohne Browserleiste.</div><button class="btn primary big" style="margin-top:10px" onclick="doInstall()">App installieren</button></div>`;
+  return `<div class="card"><b>Als App installieren</b><div class="muted small">Öffne diese Seite in <b>Chrome</b> (nicht in einer anderen App), tippe oben rechts auf <b>⋮</b> und dann auf <b>„App installieren“</b> bzw. <b>„Zum Startbildschirm hinzufügen“ → „Installieren“</b>.</div></div>`;
+}
 function vHome(){
-  const hasKey=!!S.settings.apiKey;let h='<h1>Training</h1>';
+  const hasKey=!!S.settings.apiKey;let h='<h1>Training</h1>'+installCard();
   if(S.active)h+=`<div class="card hl"><b>Training läuft</b><div class="muted small">Begonnen um ${new Date(S.active.startedAt).toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'})}</div><div class="row" style="margin-top:12px"><button class="btn primary grow" onclick="resume()">Fortsetzen</button><button class="btn danger" onclick="abortSession()">Verwerfen</button></div></div>`;
   else if(S.draft)h+=`<div class="card"><div class="row between"><div><b>Letzter Plan</b><div class="muted small">${esc(S.draft.title||MODES[S.draft.mode].t)} · ${S.draft.blocks.length} Stationen</div></div><button class="btn sm" onclick="go('plan')">Öffnen</button></div></div>`;
   h+=`<h2>Wie viel Zeit hast du?</h2><div class="chips">${[45,50,60,70,80,90].map(m=>`<button class="chip ${ui.minutes===m?'on':''}" onclick="ui.minutes=${m};render()">${m} min</button>`).join('')}</div><h2>Modus</h2>`;

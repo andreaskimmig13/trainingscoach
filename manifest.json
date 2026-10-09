@@ -2,6 +2,7 @@
   "name": "Trainingscoach",
   "short_name": "Coach",
   "description": "Dein persönlicher Begleiter fürs Gerätetraining",
+  "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
