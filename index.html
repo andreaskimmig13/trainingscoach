@@ -339,7 +339,7 @@ async function makePlan(){
   let plan=null,src='regel',err=null;
   if(ui.mode!=='standard'&&S.settings.apiKey){try{plan=await aiPlan(ui.mode,ui.minutes);src='ki';}catch(e){err=e.message;}}
   if(!plan)plan=rulePlan(ui.mode,ui.minutes);
-  Object.assign(plan,{src,mode:ui.mode,minutes:ui.minutes,err});
+  Object.assign(plan,{src,mode:ui.mode,minutes:ui.minutes,err,touched:false,aiCheck:null});
   S.draft=plan;save();ui.busy=false;ui.editBlock=null;go('plan');
 }
 
@@ -352,6 +352,7 @@ function vPlan(){
   <div class="small muted" style="margin:-6px 0 12px">≈ <b class="${total>p.minutes+3?'warnc':''}">${total} min</b> von ${p.minutes} min · ${p.blocks.length} Stationen · Tippe auf eine Station zum Anpassen</div>`;
   if(p.err)h+=`<div class="card warnbox small">KI-Trainer nicht erreichbar, Regel-Trainer genutzt. (${esc(p.err)})</div>`;
   if(p.comment)h+=`<div class="card small">${esc(p.comment)}</div>`;
+  h+=checkCard(p);
   h+=`<div class="card"><div class="row between"><div class="grow"><b>Aufwärmen</b><div class="muted small">${esc(p.warmup.text)}</div></div>${stepper(p.warmup.min+' min','wu(-1)','wu(1)')}</div></div>`;
   p.blocks.forEach((b,bi)=>h+=blockCard(b,bi));
   h+=`<button class="btn big" onclick="addToPlan()">+ Übung hinzufügen</button>
@@ -367,22 +368,75 @@ function blockCard(b,bi){
     ${open?`<button class="btn sm" onclick="event.stopPropagation();replaceItem(${bi},${ii})">Ersetzen</button>`:''}</div>
     ${open?`<div class="edit" onclick="event.stopPropagation()"><div class="row between"><span>Wiederholungen</span>${isNaN(parseInt(it.reps))?`<b>${esc(it.reps)}</b>`:stepper(esc(it.reps),`iset(${bi},${ii},'reps',-1)`,`iset(${bi},${ii},'reps',1)`)}</div><div class="row between"><span>Gewicht</span>${stepper(fmtW(it.weight),`iset(${bi},${ii},'weight',-1)`,`iset(${bi},${ii},'weight',1)`,'',`iweight(${bi},${ii})`)}</div></div>`:''}</div>`;}).join('');
   const restLine=(multi?`${b.rounds} Runden · ${b.restIn} s zwischen Geräten · ${b.rest} s nach jeder Runde`:`Pause ${b.rest} s`)+(b.warmupSet&&!multi?' · vorher 1 Aufwärmsatz':'');
-  let h=`<div class="card block ${open?'open':''}" onclick="toggleEdit(${bi})"><div class="row between small muted" style="margin-bottom:6px"><span>${bi+1}. Station${multi?' · <span class="tag">'+(b.kind==='superset'?'Supersatz':'Zirkel')+'</span>':''}</span><span>≈ ${Math.round(blockSec(b)/60)} min</span></div>${items}<div class="small muted" style="margin-top:8px">⏱ ${restLine}</div>`;
+  const flag=S.draft.touched&&planCheck(S.draft).some(x=>x.b===bi)?' ⚠️':'';
+  let h=`<div class="card block ${open?'open':''}" onclick="toggleEdit(${bi})"><div class="row between small muted" style="margin-bottom:6px"><span>${bi+1}. Station${flag}${multi?' · <span class="tag">'+(b.kind==='superset'?'Supersatz':'Zirkel')+'</span>':''}</span><span>≈ ${Math.round(blockSec(b)/60)} min</span></div>${items}<div class="small muted" style="margin-top:8px">⏱ ${restLine}</div>`;
   if(open)h+=`<div class="edit" onclick="event.stopPropagation()">
     <div class="row between"><span>${multi?'Runden':'Sätze'}</span>${stepper(b.rounds,`bset(${bi},'rounds',-1)`,`bset(${bi},'rounds',1)`)}</div>
     <div class="row between"><span>Pause${multi?' nach Runde':''}</span>${stepper(b.rest+' s',`bset(${bi},'rest',-15)`,`bset(${bi},'rest',15)`)}</div>
-    ${multi?`<div class="row between"><span>Pause zw. Geräten</span>${stepper(b.restIn+' s',`bset(${bi},'restIn',-5)`,`bset(${bi},'restIn',5)`)}</div>`:`<label class="row between"><span>Aufwärmsatz vorweg (≈60 %)</span><input type="checkbox" ${b.warmupSet?'checked':''} onchange="S.draft.blocks[${bi}].warmupSet=this.checked;save();render()"></label>`}
+    ${multi?`<div class="row between"><span>Pause zw. Geräten</span>${stepper(b.restIn+' s',`bset(${bi},'restIn',-5)`,`bset(${bi},'restIn',5)`)}</div>`:`<label class="row between"><span>Aufwärmsatz vorweg (≈60 %)</span><input type="checkbox" ${b.warmupSet?'checked':''} onchange="S.draft.blocks[${bi}].warmupSet=this.checked;touch()"></label>`}
     <div class="row wrap" style="gap:8px"><button class="btn sm" onclick="moveBlock(${bi},-1)">↑ Hoch</button><button class="btn sm" onclick="moveBlock(${bi},1)">↓ Runter</button>${multi?`<button class="btn sm" onclick="splitBlock(${bi})">Einzeln machen</button>`:''}<button class="btn sm danger" onclick="removeBlock(${bi})">Entfernen</button></div></div>`;
   return h+'</div>';
 }
+/* ===== Trainer-Kommentar zu manuellen Änderungen (regelbasiert, sofort) ===== */
+function touch(){S.draft.touched=true;S.draft.aiCheck=null;save();render();}
+function planCheck(p){
+  const out=[],W=(t,b=null)=>out.push({lvl:'warn',t,b}),I=(t,b=null)=>out.push({lvl:'info',t,b});
+  const bl=p.blocks,first=b=>XX(b.items[0].exId),nm=b=>b.items.map(i=>XX(i.exId).name).join(' + ');
+  if(p.warmup.min<5)W(`Aufwärmen nur ${p.warmup.min} min – fürs Knie mindestens 5 min, besser 8.`);
+  const ki=bl.findIndex(b=>first(b).cat==='beine'&&first(b).type==='mehr');
+  if(ki>=0&&ki<2)W(`${nm(bl[ki])} als ${ki+1}. Station: Knie ist noch nicht warm – besser ab Station 3.`,ki);
+  bl.forEach((b,i)=>{
+    const e=first(b);
+    if(b.kind==='single'&&e.cat==='beine'&&e.type==='mehr'&&e.knee&&!b.warmupSet)I(`${e.name} ohne Aufwärmsatz – fürs Knie empfehle ich einen leichten Satz vorweg.`,i);
+    if(b.rounds>5)I(`${nm(b)}: ${b.rounds} Sätze bringen bei deinem Ziel kaum mehr, 2–4 reichen.`,i);
+    if(b.kind==='single'&&e.type==='mehr'&&e.cat!=='rumpf'&&b.rest<60)I(`${e.name}: ${b.rest} s Pause ist knapp – bei großen Übungen sinkt sonst die Leistung (60–120 s).`,i);
+    if(b.rest>180)I(`${nm(b)}: ${b.rest} s Pause kostet viel Zeit – 60–120 s reichen für dein Ziel.`,i);
+    b.items.forEach(it=>{const x=XX(it.exId),rg=parseRange(it.reps);
+      if(x.knee&&rg&&rg[0]<12)W(`${x.name}: nur ${it.reps} Wdh. – fürs Knie lieber 15–20 mit weniger Gewicht.`,i);
+      const eq=equivW(x.weight,repStr(x),it.reps,x);
+      if(x.weight>0&&eq>0&&+it.weight>=eq*1.15&&+it.weight-eq>=stepOf(x))(x.knee?W:I)(`${x.name}: ${fmtW(it.weight)} ist deutlich schwerer als dein Niveau (≈${fmtW(eq)} für ${it.reps} Wdh.)${x.knee?' – Knie nicht überlasten.':' – Technik geht vor.'}`,i);
+      else if(x.weight>0&&eq>0&&+it.weight<=eq*.7)I(`${x.name}: ${fmtW(it.weight)} ist sehr leicht – passt als Entlastung, sonst eher ≈${fmtW(eq)}.`,i);
+      if(x.knee&&painful(x.note)&&+it.weight>x.weight)W(`${x.name}: letzte Notiz meldet Beschwerden – Gewicht diesmal nicht erhöhen.`,i);});
+  });
+  for(let i=2;i<bl.length;i++)if([0,1,2].every(k=>first(bl[i-k]).cat==='beine')){I(`Drei Beinübungen am Stück (ab Station ${i-1}) – Knie wird lange belastet, besser Oberkörper dazwischen.`,i);break;}
+  const lastHeavy=Math.max(-1,...bl.map((b,i)=>first(b).cat!=='rumpf'&&first(b).type==='mehr'?i:-1));
+  const coreEarly=bl.findIndex(b=>first(b).cat==='rumpf');
+  if(coreEarly>=0&&coreEarly<lastHeavy)I(`Rumpf vor großen Übungen ermüdet die Stabilisation – Bauch/Rücken lieber ans Ende.`,coreEarly);
+  const cats=bl.flatMap(b=>b.items.map(i=>XX(i.exId).cat)),push=cats.filter(c=>c==='druecken').length,pull=cats.filter(c=>c==='ziehen').length;
+  if(!bl.some(b=>b.items.some(i=>XX(i.exId).knee)))W('Keine Knie-Übung im Plan – mindestens eine sollte immer dabei sein.');
+  if(push&&!pull)I('Nur Drücken, kein Ziehen – für Haltung und Schultern eine Zugübung ergänzen.');
+  else if(pull&&!push)I('Nur Ziehen, kein Drücken – eine Druckübung ergänzen.');
+  else if(push>pull+1)I(`Mehr Drücken (${push}) als Ziehen (${pull}) – für die Haltung lieber ausgeglichen.`);
+  const ids=bl.flatMap(b=>b.items.map(i=>i.exId)),dup=ids.find((id,i)=>ids.indexOf(id)!==i);
+  if(dup)I(`${XX(dup).name} ist doppelt im Plan.`);
+  const tot=Math.round(planSec(p)/60);if(tot>p.minutes+5)I(`Plan dauert ≈${tot} min, du hast ${p.minutes} – evtl. eine optionale Übung streichen.`);
+  return out;
+}
+function checkCard(p){
+  if(!p.touched)return '';
+  const c=planCheck(p),hasKey=!!S.settings.apiKey;
+  let h=`<div class="card ${c.some(x=>x.lvl==='warn')?'warnbox':''}" style="color:var(--text)"><div class="row between"><b>Trainer-Kommentar</b>${hasKey?`<button class="btn sm" onclick="aiCheck()" ${ui.busy?'disabled':''}>${ui.busy?'…':'KI fragen'}</button>`:''}</div>`;
+  h+=c.length?c.map(x=>`<div class="small" style="margin-top:6px">${x.lvl==='warn'?'⚠️':'ℹ️'} ${esc(x.t)}</div>`).join(''):`<div class="small" style="margin-top:6px">👍 Passt so – deine Änderungen sind sinnvoll.</div>`;
+  if(p.aiCheck)h+=`<div class="small ai-text" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)"><span class="tag ai">KI-Trainer</span> ${esc(p.aiCheck)}</div>`;
+  return h+'</div>';
+}
+async function aiCheck(){
+  if(ui.busy)return;ui.busy=true;render();
+  try{const p=S.draft;
+    const plan={aufwaermen_min:p.warmup.min,stationen:p.blocks.map((b,i)=>({nr:i+1,art:b.kind,saetze:b.rounds,pause_s:b.rest,aufwaermsatz:!!b.warmupSet,uebungen:b.items.map(it=>({name:XX(it.exId).name,wdh:it.reps,kg:it.weight}))})),zeit_min:p.minutes};
+    const user=`Der Kunde hat den Plan manuell angepasst. Kommentiere kurz und knapp (max. 3 Sätze, du-Form): Ist etwas wirklich suboptimal oder riskant? Wenn alles passt, sag das in einem Satz. Kein JSON, nur Text.\n\nPlan:\n${JSON.stringify(plan)}\n\nRegel-Check:\n${planCheck(p).map(x=>x.t).join('\n')||'keine Auffälligkeiten'}\n\nKontext:\n${JSON.stringify(trainerContext())}`;
+    p.aiCheck=(await askAI(TRAINER_SYS.replace(/Antworte ausschließlich mit gültigem JSON[^]*$/,'Antworte knapp in normalem Text.'),user,400)).trim();
+  }catch(e){toast('KI-Fehler: '+e.message);}
+  ui.busy=false;save();render();
+}
 function toggleEdit(bi){ui.editBlock=ui.editBlock===bi?null:bi;render();}
-function wu(d){const p=S.draft;p.warmup.min=clamp(p.warmup.min+d,0,30);save();render();}
-function bset(bi,k,d){const b=S.draft.blocks[bi],lim={rounds:[1,8],rest:[15,300],restIn:[0,120]}[k];b[k]=clamp((b[k]||0)+d,lim[0],lim[1]);save();render();}
-function iset(bi,ii,k,d){const it=S.draft.blocks[bi].items[ii];if(k==='reps'){const r=parseRange(it.reps);if(!r)return;const a=clamp(r[0]+d,1,50),b=clamp(r[1]+d,1,60),old=it.reps;it.reps=a===b?String(a):a+'–'+b;it.weight=equivW(+it.weight,old,it.reps,XX(it.exId));}else it.weight=r2(Math.max(0,+it.weight+d*stepOf(XX(it.exId))));save();render();}
-function iweight(bi,ii){const it=S.draft.blocks[bi].items[ii];const v=prompt('Gewicht in kg',it.weight);if(v===null)return;const n=parseFloat(String(v).replace(',','.'));if(isFinite(n)&&n>=0){it.weight=n;save();render();}}
-function moveBlock(bi,d){const a=S.draft.blocks,j=bi+d;if(j<0||j>=a.length)return;[a[bi],a[j]]=[a[j],a[bi]];ui.editBlock=j;save();render();}
-function removeBlock(bi){S.draft.blocks.splice(bi,1);ui.editBlock=null;save();render();}
-function splitBlock(bi){const b=S.draft.blocks[bi];S.draft.blocks.splice(bi,1,...b.items.map(it=>({kind:'single',rounds:b.rounds,rest:restFor(XX(it.exId)),restIn:0,items:[it]})));ui.editBlock=null;save();render();}
+function wu(d){const p=S.draft;p.warmup.min=clamp(p.warmup.min+d,0,30);touch();}
+function bset(bi,k,d){const b=S.draft.blocks[bi],lim={rounds:[1,8],rest:[15,300],restIn:[0,120]}[k];b[k]=clamp((b[k]||0)+d,lim[0],lim[1]);touch();}
+function iset(bi,ii,k,d){const it=S.draft.blocks[bi].items[ii];if(k==='reps'){const r=parseRange(it.reps);if(!r)return;const a=clamp(r[0]+d,1,50),b=clamp(r[1]+d,1,60),old=it.reps;it.reps=a===b?String(a):a+'–'+b;it.weight=equivW(+it.weight,old,it.reps,XX(it.exId));}else it.weight=r2(Math.max(0,+it.weight+d*stepOf(XX(it.exId))));touch();}
+function iweight(bi,ii){const it=S.draft.blocks[bi].items[ii];const v=prompt('Gewicht in kg',it.weight);if(v===null)return;const n=parseFloat(String(v).replace(',','.'));if(isFinite(n)&&n>=0){it.weight=n;touch();}}
+function moveBlock(bi,d){const a=S.draft.blocks,j=bi+d;if(j<0||j>=a.length)return;[a[bi],a[j]]=[a[j],a[bi]];ui.editBlock=j;touch();}
+function removeBlock(bi){S.draft.blocks.splice(bi,1);ui.editBlock=null;touch();}
+function splitBlock(bi){const b=S.draft.blocks[bi];S.draft.blocks.splice(bi,1,...b.items.map(it=>({kind:'single',rounds:b.rounds,rest:restFor(XX(it.exId)),restIn:0,items:[it]})));ui.editBlock=null;touch();}
 
 /* Auswahl-Liste (Ersetzen / Hinzufügen) */
 let pickCb=null;
@@ -401,14 +455,14 @@ function pickExercise(title,sections,cb,dimIds=[]){
 function pickDone(id){const cb=pickCb;pickCb=null;closeSheet();if(cb)cb(id);}
 function replaceItem(bi,ii){
   const it=S.draft.blocks[bi].items[ii];
-  pickExercise('Ersetzen durch',similar(it.exId),id=>{const n=X(id),b=S.draft.blocks[bi];it.exId=id;it.weight=n.weight;it.reps=repStr(n);it.hint='';if(b.kind==='single'){b.rounds=n.sets;b.rest=restFor(n);}save();render();});
+  pickExercise('Ersetzen durch',similar(it.exId),id=>{const n=X(id),b=S.draft.blocks[bi];it.exId=id;it.weight=n.weight;it.reps=repStr(n);it.hint='';if(b.kind==='single'){b.rounds=n.sets;b.rest=restFor(n);}touch();});
 }
 function addToPlan(){
   const inPlan=S.draft.blocks.flatMap(b=>b.items.map(i=>i.exId)),act=S.exercises.filter(e=>e.active);
   pickExercise('Übung hinzufügen',Object.entries(CATS).map(([k,t])=>[t,act.filter(e=>e.cat===k)]),id=>{
     const e=X(id),b=single(e),bl=S.draft.blocks;
     if(e.cat==='rumpf')bl.push(b);else{const i=bl.findIndex(x=>catOf(x)==='rumpf');i<0?bl.push(b):bl.splice(i,0,b);}
-    ui.editBlock=null;save();render();toast(e.name+' hinzugefügt');},inPlan);
+    ui.editBlock=null;touch();},inPlan);
 }
 
 /* ================= Training durchführen ================= */
@@ -622,7 +676,9 @@ function saveEx(id){
   if(e.startWeight===null)e.startWeight=w;
   if(!e.repsMax||e.repsMax<e.reps)e.repsMax=e.reps;
   if(isNew){e.order=0;e.order=trainerOrder(e);}
-  save();closeSheet();render();toast(isNew?name+' angelegt':'Gespeichert');
+  save();closeSheet();render();
+  const tip=e.knee&&e.repsMax<12?'Trainer: Fürs Knie lieber 15–20 Wdh. mit weniger Gewicht.':e.sets>5?'Trainer: Mehr als 4–5 Sätze bringen bei deinem Ziel kaum mehr.':e.rest&&e.type==='mehr'&&e.rest<60?'Trainer: Unter 60 s Pause ist bei großen Übungen knapp.':'';
+  toast((isNew?name+' angelegt':'Gespeichert')+(tip?' · '+tip:''));
 }
 function orderSheet(){
   const list=S.exercises.slice().sort((a,b)=>a.order-b.order);
@@ -662,7 +718,7 @@ function vSettings(){
   <button class="btn big" style="margin-top:12px" onclick="resetRx()">Trainer-Vorgaben neu laden</button>
   <p class="small muted">Setzt Sätze, Wdh.-Bereiche und Tipps deiner Startgeräte auf die Trainer-Werte zurück. Gewichte und Verlauf bleiben.</p>
   <button class="btn big danger" style="margin-top:4px" onclick="resetAll()">Alles zurücksetzen</button></div>
-  <p class="small muted center">Trainingscoach · Version 1.4</p>`;
+  <p class="small muted center">Trainingscoach · Version 1.5</p>`;
 }
 function saveSettings(){
   const g=id=>document.getElementById(id),st=S.settings;
