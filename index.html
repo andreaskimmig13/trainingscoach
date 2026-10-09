@@ -104,7 +104,7 @@ const MODES={
 };
 const MODELS=[['claude-sonnet-5-5','Sonnet 5.5 (empfohlen)'],['claude-haiku-5-5','Haiku 5.5 (günstig)'],['claude-opus-5-5','Opus 5.5 (am stärksten)']];
 
-function defaultSettings(){return {apiKey:'',model:'claude-sonnet-5-5',warmup:8,warmupText:'Rad oder Crosstrainer, locker steigernd',step:2.5};}
+function defaultSettings(){return {apiKey:'',model:'claude-sonnet-5-5',warmup:8,warmupText:'Rad oder Crosstrainer, locker steigernd',step:5};}
 function seed(){
   const e=(name,nr,cat,type,group,sets,reps,weight,start,o={})=>({id:uid(),name,nr,cat,type,group,sets,reps,weight,startWeight:start,knee:!!o.knee,prio:o.prio||2,rest:null,note:o.note||'',active:true,hist:[],order:trainerOrder({name,nr,cat})});
   return {v:1,settings:defaultSettings(),sessions:[],active:null,draft:null,summary:null,exercises:[
@@ -133,17 +133,17 @@ function trainerOrder(e){const k=TRAINER_ORDER[(e.nr||'').trim()]??TRAINER_ORDER
   const firstCore=Math.min(...list.filter(x=>x.cat==='rumpf').map(x=>x.order||999),999);return firstCore-1;}
 /* Trainer-Vorgaben: Sätze × Wdh.-Bereich (doppelte Progression) + Ausführungstipp */
 const RX={
- '3028':{sets:2,reps:15,repsMax:20,wf:.9,cue:'Aufrecht sitzen, langsam öffnen, 2 s zurück – nicht zurückschnellen lassen.'},
+ '3028':{base:[60,12],sets:2,reps:15,repsMax:20,wf:.9,cue:'Aufrecht sitzen, langsam öffnen, 2 s zurück – nicht zurückschnellen lassen.'},
  '3020':{sets:3,reps:10,repsMax:12,cue:'Brust raus, Stange zur oberen Brust, Schulterblätter aktiv nach unten ziehen.'},
- '3003':{sets:3,reps:12,repsMax:15,wf:.9,cue:'Becken fest ins Polster, kontrolliert beugen, 3 s zurück.'},
- '3002':{sets:3,reps:12,repsMax:15,wf:.9,cue:'Becken fest ins Polster, kontrolliert beugen, 3 s zurück.'},
+ '3003':{base:[45,12],sets:3,reps:12,repsMax:15,wf:.9,cue:'Becken fest ins Polster, kontrolliert beugen, 3 s zurück.'},
+ '3002':{base:[25,12],sets:3,reps:12,repsMax:15,wf:.9,cue:'Becken fest ins Polster, kontrolliert beugen, 3 s zurück.'},
  '3016':{sets:3,reps:10,repsMax:12,cue:'Griffe auf Brusthöhe, Schulterblätter zusammen, Ellbogen leicht unter Schulterhöhe.'},
  '3023':{sets:3,reps:10,repsMax:12,cue:'Schulterblätter fixiert, kontrolliert zurück, nicht abfedern.'},
- '3031':{sets:3,reps:15,repsMax:20,wf:.8,cue:'Leichteres Gewicht, dafür gleichmäßig: Knie über die Fußspitzen, oben nicht ganz durchstrecken, 3 s ablassen. Bei Knieschmerz Bewegung verkürzen.'},
+ '3031':{base:[69,11],sets:3,reps:15,repsMax:20,wf:.8,cue:'Leichteres Gewicht, dafür gleichmäßig: Knie über die Fußspitzen, oben nicht ganz durchstrecken, 3 s ablassen. Bei Knieschmerz Bewegung verkürzen.'},
  '3040':{sets:3,reps:10,repsMax:12,cue:'Brust ans Polster, Ellbogen eng nach hinten, Schulterblätter zusammenziehen.'},
- '3001':{sets:3,reps:15,repsMax:20,wf:.8,cue:'Polster knapp über dem Fußgelenk, oben 1 s halten, 3 s ablassen. Leicht beginnen, schmerzfrei bleiben.'},
+ '3001':{base:[30,10],sets:3,reps:15,repsMax:20,wf:.8,cue:'Polster knapp über dem Fußgelenk, oben 1 s halten, 3 s ablassen. Leicht beginnen, schmerzfrei bleiben.'},
  'schulterpresse':{sets:3,reps:10,repsMax:12,cue:'Rücken fest anlehnen, kein Hohlkreuz, Arme oben nicht ganz durchstrecken.'},
- '3029':{sets:2,reps:15,repsMax:20,wf:.9,cue:'Langsam schließen, kurz halten, kontrolliert öffnen.'},
+ '3029':{base:[35,12],sets:2,reps:15,repsMax:20,wf:.9,cue:'Langsam schließen, kurz halten, kontrolliert öffnen.'},
  '3037':{sets:3,reps:12,repsMax:15,cue:'Beim Einrollen ausatmen, Bewegung aus dem Bauch, nicht mit den Armen ziehen.'},
  '3008':{sets:3,reps:12,repsMax:15,cue:'Langsam einrollen, unten nicht ablegen – Spannung halten.'},
  'rückenstrecker':{sets:3,reps:12,repsMax:15,cue:'Langsam aufrichten bis zur geraden Haltung, nicht überstrecken.'}
@@ -152,7 +152,10 @@ const rxOf=e=>RX[(e.nr||'').trim()]||RX[(e.name||'').trim().toLowerCase()];
 function applyRx(e){const r=rxOf(e);if(r){e.sets=r.sets;e.reps=r.reps;e.repsMax=r.repsMax;e.cue=r.cue;}return !!r;}
 const repStr=e=>(e.repsMax&&e.repsMax>e.reps)?`${e.reps}–${e.repsMax}`:String(e.reps);
 function parseRange(s){const m=String(s).match(/(\d+)\D+(\d+)/);if(m)return [+m[1],+m[2]];const n=parseInt(s);return isNaN(n)?null:[n,n];}
-function migrate(s){s.settings=Object.assign(defaultSettings(),s.settings||{});s.sessions=s.sessions||[];s.exercises.forEach(e=>{e.hist=e.hist||[];if(typeof e.order!=='number')e.order=trainerOrder(e);if(!s.rx)applyRx(e);if((s.rx||0)<2){const r=rxOf(e);if(r&&r.wf){applyRx(e);const st=s.settings.step||2.5;e.weight=Math.round(e.weight*r.wf/st)*st;}}if(!e.repsMax)e.repsMax=e.reps;if(e.cue===undefined)e.cue='';});s.rx=2;return s;}
+function migrate(s){s.settings=Object.assign(defaultSettings(),s.settings||{});if((s.rx||0)<3&&s.settings.step===2.5)s.settings.step=5;s.sessions=s.sessions||[];s.exercises.forEach(e=>{e.hist=e.hist||[];if(typeof e.order!=='number')e.order=trainerOrder(e);if(!s.rx)applyRx(e);if((s.rx||0)<3){const r=rxOf(e);if(r&&r.base){applyRx(e);const st=s.settings.step||5,[bw,br]=r.base,m=(r.reps+r.repsMax)/2;
+      e.weight=Math.max(0,Math.round(bw*(1+br/30)/(1+m/30)/st)*st);}}
+    if(!e.repsMax)e.repsMax=e.reps;if(e.cue===undefined)e.cue='';});
+  s.rx=3;return s;}
 function load(){try{const s=JSON.parse(localStorage.getItem(STORE));if(s&&Array.isArray(s.exercises))return migrate(s);}catch(e){}return migrate(seed());}
 let S=load();save();
 function save(){try{localStorage.setItem(STORE,JSON.stringify(S));}catch(e){toast('Speichern fehlgeschlagen');}}
@@ -163,7 +166,11 @@ const XX=id=>X(id)||{id,name:'(gelöschtes Gerät)',nr:'',cat:'rumpf',type:'iso'
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 const r2=v=>Math.round(v*100)/100;
-const roundW=w=>{const st=S.settings.step||2.5;return Math.max(0,Math.round(w/st)*st);};
+const stepOf=e=>(e&&e.step)||S.settings.step||5;
+const roundW=(w,e)=>{const st=stepOf(e);return Math.max(0,r2(Math.round(w/st)*st));};
+/* Gleiche Intensität bei anderem Wdh.-Bereich: geschätztes Maximalgewicht (Epley) bleibt gleich */
+const midReps=r=>{const g=parseRange(r);return g?(g[0]+g[1])/2:null;};
+function equivW(w,fromReps,toReps,e){const a=midReps(fromReps),b=midReps(toReps);if(!a||!b||!(w>0))return w;return roundW(w*(1+a/30)/(1+b/30),e);}
 const fmtW=w=>(+w>0?(+w).toLocaleString('de-DE')+' kg':'– kg');
 const fmtSec=s=>{s=Math.max(0,s);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
 const fmtDate=iso=>new Date(iso).toLocaleDateString('de-DE',{weekday:'short',day:'2-digit',month:'2-digit',year:'2-digit'});
@@ -217,8 +224,8 @@ function rulePlan(mode,minutes){
   if(mode==='variation'){
     shuffle(blocks.filter(b=>!painful(XX(b.items[0].exId).note))).slice(0,2).forEach(b=>{
       const e=XX(b.items[0].exId),it=b.items[0];
-      if(e.knee||e.cat==='rumpf'||Math.random()<.5){b.rounds=2;it.reps=e.knee?'20':'15';it.weight=roundW(e.weight*.85);b.rest=Math.max(45,restFor(e)-15);it.hint='Leichter, dafür sauber und kontrolliert';notes.push(`${e.name}: 2×${it.reps} leichter`);}
-      else{b.rounds=4;it.reps='8';it.weight=roundW(e.weight*1.05);b.rest=restFor(e)+15;it.hint='Etwas schwerer, saubere Technik vor Gewicht';notes.push(`${e.name}: 4×8 etwas schwerer`);}
+      if(e.knee||e.cat==='rumpf'||Math.random()<.5){b.rounds=2;const from=repStr(e);it.reps=e.knee?'20':'15';it.weight=equivW(e.weight,from,it.reps,e);b.rest=Math.max(45,restFor(e)-15);it.hint='Mehr Wiederholungen, gleiche Anstrengung';notes.push(`${e.name}: 2×${it.reps}`);}
+      else{b.rounds=4;const from=repStr(e);it.reps='8';it.weight=equivW(e.weight,from,'8',e);b.rest=restFor(e)+15;it.hint='Weniger Wiederholungen, gleiche Anstrengung – saubere Technik';notes.push(`${e.name}: 4×8`);}
     });
   }
   const so=b=>{const id=b.items[0].exId;return slot.has(id)?slot.get(id):XX(id).order;};
@@ -371,7 +378,7 @@ function blockCard(b,bi){
 function toggleEdit(bi){ui.editBlock=ui.editBlock===bi?null:bi;render();}
 function wu(d){const p=S.draft;p.warmup.min=clamp(p.warmup.min+d,0,30);save();render();}
 function bset(bi,k,d){const b=S.draft.blocks[bi],lim={rounds:[1,8],rest:[15,300],restIn:[0,120]}[k];b[k]=clamp((b[k]||0)+d,lim[0],lim[1]);save();render();}
-function iset(bi,ii,k,d){const it=S.draft.blocks[bi].items[ii];if(k==='reps'){const r=parseRange(it.reps);if(!r)return;const a=clamp(r[0]+d,1,50),b=clamp(r[1]+d,1,60);it.reps=a===b?String(a):a+'–'+b;}else it.weight=r2(Math.max(0,+it.weight+d*S.settings.step));save();render();}
+function iset(bi,ii,k,d){const it=S.draft.blocks[bi].items[ii];if(k==='reps'){const r=parseRange(it.reps);if(!r)return;const a=clamp(r[0]+d,1,50),b=clamp(r[1]+d,1,60),old=it.reps;it.reps=a===b?String(a):a+'–'+b;it.weight=equivW(+it.weight,old,it.reps,XX(it.exId));}else it.weight=r2(Math.max(0,+it.weight+d*stepOf(XX(it.exId))));save();render();}
 function iweight(bi,ii){const it=S.draft.blocks[bi].items[ii];const v=prompt('Gewicht in kg',it.weight);if(v===null)return;const n=parseFloat(String(v).replace(',','.'));if(isFinite(n)&&n>=0){it.weight=n;save();render();}}
 function moveBlock(bi,d){const a=S.draft.blocks,j=bi+d;if(j<0||j>=a.length)return;[a[bi],a[j]]=[a[j],a[bi]];ui.editBlock=j;save();render();}
 function removeBlock(bi){S.draft.blocks.splice(bi,1);ui.editBlock=null;save();render();}
@@ -407,7 +414,7 @@ function addToPlan(){
 /* ================= Training durchführen ================= */
 let timerInt=null,lastBeep=-1;
 function buildSteps(p){const s=[];if(p.warmup.min>0)s.push({t:'warm'});p.blocks.forEach((b,bi)=>{if(b.warmupSet&&b.kind==='single')s.push({t:'set',b:bi,i:0,r:-1,ws:true});for(let r=0;r<b.rounds;r++)b.items.forEach((it,ii)=>s.push({t:'set',b:bi,i:ii,r}));});return s;}
-const wsWeight=w=>roundW(w*.6);
+const wsWeight=(w,e)=>roundW(w*.6,e);
 function startSession(){
   if(!S.draft||!S.draft.blocks.length)return toast('Der Plan ist leer');
   unlockAudio();
@@ -448,7 +455,7 @@ function warmView(a){
 function setView(){
   const {a,st,b,it}=cur(),e=XX(it.exId),L=logFor(st,it,b);
   if(st.ws)return `<div class="muted small">${e.nr?'Gerät-Nr. '+esc(e.nr):''}</div><h1 class="ex-title">${esc(e.name)}</h1><div class="setno">Aufwärmsatz</div>
-  <div class="card"><div class="row between"><span class="muted">Gewicht (ca. 60 %)</span><b style="font-size:24px">${fmtW(wsWeight(it.weight))}</b></div><div class="row between" style="margin-top:12px"><span class="muted">Wdh.</span><b style="font-size:24px">15</b></div></div>
+  <div class="card"><div class="row between"><span class="muted">Gewicht (ca. 60 %)</span><b style="font-size:24px">${fmtW(wsWeight(it.weight,e))}</b></div><div class="row between" style="margin-top:12px"><span class="muted">Wdh.</span><b style="font-size:24px">15</b></div></div>
   <div class="card small">💡 Locker und langsam, Gelenk an die Bewegung gewöhnen. Zählt nicht als Arbeitssatz.</div>
   ${e.note?`<div class="card small"><span class="muted">Notiz vom letzten Mal:</span> ${esc(e.note)}</div>`:''}
   <button class="btn primary huge" onclick="setDone()">✓ Aufwärmsatz fertig</button>
@@ -473,7 +480,7 @@ function restView(a){
   return `<div class="muted small center">Pause</div>${ring(left,a.restTotal)}
   <div class="row" style="gap:8px"><button class="btn grow" onclick="restAdd(-15)">−15 s</button><button class="btn grow" onclick="restAdd(15)">+15 s</button></div>
   <div class="card next" style="margin-top:12px"><div class="muted small">Als Nächstes${newStation?' · Gerät wechseln':''}</div><b>${esc(e.name)}</b> <span class="muted">${e.nr?'#'+esc(e.nr):''}</span>
-  <div>${st.ws?'Aufwärmsatz · 15 Wdh · '+fmtW(wsWeight(it.weight)):(b.kind==='single'?'Satz':'Runde')+' '+(st.r+1)+' von '+b.rounds+' · '+esc(it.reps)+' Wdh · '+fmtW(it.weight)}</div>${newStation&&e.note?`<div class="small muted" style="margin-top:6px">Notiz: ${esc(e.note)}</div>`:''}</div>
+  <div>${st.ws?'Aufwärmsatz · 15 Wdh · '+fmtW(wsWeight(it.weight,e)):(b.kind==='single'?'Satz':'Runde')+' '+(st.r+1)+' von '+b.rounds+' · '+esc(it.reps)+' Wdh · '+fmtW(it.weight)}</div>${newStation&&e.note?`<div class="small muted" style="margin-top:6px">Notiz: ${esc(e.note)}</div>`:''}</div>
   <button class="btn primary big" onclick="restSkip()">Pause beenden</button>`;
 }
 function tick(){
@@ -501,7 +508,7 @@ function skipWarmupSet(){const a=S.active;a.steps.splice(a.idx,1);if(enterStep()
 function warmDone(){const a=S.active;a.idx++;if(enterStep()){save();render();}}
 function restSkip(){if(enterStep()){save();render();}}
 function restAdd(d){const a=S.active;a.endsAt+=d*1000;a.restTotal=Math.max(1,a.restTotal+d);save();tick();}
-function wAdj(d){const {it}=cur();it.weight=r2(Math.max(0,+it.weight+d*S.settings.step));save();render();}
+function wAdj(d){const {it}=cur();it.weight=r2(Math.max(0,+it.weight+d*stepOf(XX(it.exId))));save();render();}
 function wSet(){const {it}=cur();const v=prompt('Gewicht in kg',it.weight);if(v===null)return;const n=parseFloat(String(v).replace(',','.'));if(isFinite(n)&&n>=0){it.weight=n;save();render();}}
 function rAdj(d){const {it}=cur();const base=ui.reps??parseInt(it.reps);ui.reps=clamp(base+d,0,60);render();}
 function noteIn(v){const {st,it,b}=cur();logFor(st,it,b).note=v;save();}
@@ -538,8 +545,8 @@ function finish(){
         const hurt=painful(l.note)||(e.knee&&!l.note.trim()&&painful(e.note));
         if(sugg.some(x=>x.exId===e.id)){}
         else if(hurt)sugg.push({exId:e.id,to:null,reason:'Notiz deutet auf Knie-/Gelenkbeschwerden – Gewicht halten und beobachten.'});
-        else if(std&&atTop&&w>0)sugg.push({exId:e.id,to:r2(e.weight+S.settings.step),reason:`Obergrenze von ${rg[1]} Wdh. in allen Sätzen erreicht – nächstes Mal mehr Gewicht und wieder bei ${rg[0]} Wdh. starten.`});
-        else if(std&&tooHeavy&&w>0)sugg.push({exId:e.id,to:r2(Math.max(0,e.weight-S.settings.step)),reason:`Deutlich unter ${rg[0]} Wdh. – etwas leichter, damit die Technik sauber bleibt.`});
+        else if(std&&atTop&&w>0)sugg.push({exId:e.id,to:r2(e.weight+stepOf(e)),reason:`Obergrenze von ${rg[1]} Wdh. in allen Sätzen erreicht – nächstes Mal mehr Gewicht und wieder bei ${rg[0]} Wdh. starten.`});
+        else if(std&&tooHeavy&&w>0)sugg.push({exId:e.id,to:r2(Math.max(0,e.weight-stepOf(e))),reason:`Deutlich unter ${rg[0]} Wdh. – etwas leichter, damit die Technik sauber bleibt.`});
         else if(std&&rg&&rg[1]>rg[0]&&full)sugg.push({exId:e.id,to:null,reason:`Gewicht halten und nächstes Mal 1–2 Wdh. mehr anpeilen (Ziel ${rg[1]}).`});}
       if(l.note.trim())e.note=l.note.trim();
     }
@@ -596,7 +603,7 @@ function editEx(id){
   <div class="grid2"><div><label class="f">Kategorie</label><select id="f_cat">${opt(CATS,e.cat)}</select></div><div><label class="f">Art</label><select id="f_type">${opt(TYPES,e.type)}</select></div></div>
   <label class="f">Gruppe (Alternativen)</label><input id="f_group" list="grp" value="${esc(e.group)}" placeholder="z. B. Brust"><datalist id="grp">${groups.map(g=>`<option value="${esc(g)}">`).join('')}</datalist>
   <div class="grid3"><div><label class="f">Sätze</label><input id="f_sets" type="number" min="1" max="8" value="${e.sets}"></div><div><label class="f">Wdh. von</label><input id="f_reps" type="number" min="1" max="50" value="${e.reps}"></div><div><label class="f">Wdh. bis</label><input id="f_repsMax" type="number" min="1" max="60" value="${e.repsMax||e.reps}"></div></div>
-  <label class="f">Gewicht kg</label><input id="f_w" type="number" step="0.5" min="0" value="${e.weight}">
+  <div class="grid2"><div><label class="f">Gewicht kg</label><input id="f_w" type="number" step="0.5" min="0" value="${e.weight}"></div><div><label class="f">Gewichtsschritt kg</label><input id="f_step" type="number" step="0.5" min="0.5" value="${e.step||''}" placeholder="Standard: ${S.settings.step}"></div></div>
   <div class="grid2"><div><label class="f">Priorität</label><select id="f_prio">${opt(PRIOS,e.prio)}</select></div><div><label class="f">Pause (s)</label><input id="f_rest" type="number" min="15" max="300" value="${e.rest||''}" placeholder="Trainer: ${restFor(Object.assign({},e,{rest:null}))}"></div></div>
   <label class="row" style="margin-top:14px"><input type="checkbox" id="f_knee" ${e.knee?'checked':''}> <span>Knie-Fokus (wird bei Schmerz-Notiz nicht gesteigert)</span></label>
   <label class="row" style="margin-top:10px"><input type="checkbox" id="f_active" ${e.active?'checked':''}> <span>Aktiv (wird für Pläne genutzt)</span></label>
@@ -611,7 +618,7 @@ function saveEx(id){
   let e=id?X(id):null;const isNew=!e;
   if(isNew){e={id:uid(),hist:[],startWeight:null,order:0};S.exercises.push(e);}
   const w=parseFloat(v('w').value.replace(',','.'))||0;
-  Object.assign(e,{name,nr:v('nr').value.trim(),cat:v('cat').value,type:v('type').value,group:v('group').value.trim(),sets:clamp(parseInt(v('sets').value)||3,1,8),reps:clamp(parseInt(v('reps').value)||10,1,50),repsMax:clamp(parseInt(v('repsMax').value)||0,1,60),cue:v('cue').value.trim(),weight:w,prio:+v('prio').value,rest:parseInt(v('rest').value)?clamp(parseInt(v('rest').value),15,300):null,knee:v('knee').checked,active:v('active').checked,note:v('note').value.trim()});
+  Object.assign(e,{name,nr:v('nr').value.trim(),cat:v('cat').value,type:v('type').value,group:v('group').value.trim(),sets:clamp(parseInt(v('sets').value)||3,1,8),reps:clamp(parseInt(v('reps').value)||10,1,50),repsMax:clamp(parseInt(v('repsMax').value)||0,1,60),cue:v('cue').value.trim(),step:parseFloat(String(v('step').value).replace(',','.'))||null,weight:w,prio:+v('prio').value,rest:parseInt(v('rest').value)?clamp(parseInt(v('rest').value),15,300):null,knee:v('knee').checked,active:v('active').checked,note:v('note').value.trim()});
   if(e.startWeight===null)e.startWeight=w;
   if(!e.repsMax||e.repsMax<e.reps)e.repsMax=e.reps;
   if(isNew){e.order=0;e.order=trainerOrder(e);}
@@ -655,7 +662,7 @@ function vSettings(){
   <button class="btn big" style="margin-top:12px" onclick="resetRx()">Trainer-Vorgaben neu laden</button>
   <p class="small muted">Setzt Sätze, Wdh.-Bereiche und Tipps deiner Startgeräte auf die Trainer-Werte zurück. Gewichte und Verlauf bleiben.</p>
   <button class="btn big danger" style="margin-top:4px" onclick="resetAll()">Alles zurücksetzen</button></div>
-  <p class="small muted center">Trainingscoach · Version 1.3</p>`;
+  <p class="small muted center">Trainingscoach · Version 1.4</p>`;
 }
 function saveSettings(){
   const g=id=>document.getElementById(id),st=S.settings;
