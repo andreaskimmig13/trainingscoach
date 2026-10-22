@@ -526,7 +526,7 @@ function endEarly(){if(!confirm('Training jetzt beenden und speichern?'))return;
 function vRun(){
   const a=S.active;if(!a){ui.view='home';return vHome();}
   const sets=a.steps.filter(s=>s.t==='set').length,done=a.steps.slice(0,a.idx).filter(s=>s.t==='set').length;
-  const top=`<div class="run-top"><span class="muted small">${done} von ${sets} Sätzen</span><button class="btn sm ghost" onclick="endEarly()">Beenden</button></div><div class="progress"><i style="width:${sets?done/sets*100:0}%"></i></div>`;
+  const top=`<div class="run-top"><span class="muted small">${done} von ${sets} Sätzen</span><div class="row" style="gap:4px"><button class="btn sm" onclick="overview()">☰ Übersicht</button><button class="btn sm ghost" onclick="endEarly()">Beenden</button></div></div><div class="progress"><i style="width:${sets?done/sets*100:0}%"></i></div>`;
   if(a.phase==='warm')return top+warmView(a);
   if(a.phase==='rest')return top+restView(a);
   return top+setView();
@@ -601,6 +601,53 @@ function wAdj(d){const {it}=cur();it.weight=r2(Math.max(0,+it.weight+d*stepOf(XX
 function wSet(){const {it}=cur();const v=prompt('Gewicht in kg',it.weight);if(v===null)return;const n=parseFloat(String(v).replace(',','.'));if(isFinite(n)&&n>=0){it.weight=n;save();render();}}
 function rAdj(d){const {it}=cur();const base=ui.reps??parseInt(it.reps);ui.reps=clamp(base+d,0,60);render();}
 function noteIn(v){const {st,it,b}=cur();logFor(st,it,b).note=v;save();}
+/* ===== Übersicht während des Trainings ===== */
+function remStart(a){return a.phase==='warm'?a.idx+1:a.idx;}
+function blockStatus(a,bi){
+  const b=a.plan.blocks[bi],rem=a.steps.slice(remStart(a)).filter(s=>s.b===bi&&!s.ws).length;
+  const logs=Object.values(a.log).filter(l=>l.b===bi),done=logs.reduce((n,l)=>n+l.sets.length,0),total=b.rounds*b.items.length;
+  return {b,bi,rem,done,total,logs,first:logs.length?Math.min(...logs.map(l=>l.order)):1e9};
+}
+function overview(){
+  const a=S.active;if(!a)return;
+  const start=remStart(a),cb=a.phase!=='warm'&&a.steps[a.idx]?a.steps[a.idx].b:null;
+  const all=a.plan.blocks.map((_,bi)=>blockStatus(a,bi));
+  const upOrder=[];a.steps.slice(start).forEach(s=>{if(!upOrder.includes(s.b))upOrder.push(s.b);});
+  const doneL=all.filter(x=>x.rem===0&&x.done>=x.total).sort((p,q)=>p.first-q.first);
+  const upL=upOrder.map(bi=>all[bi]);
+  const skipL=all.filter(x=>x.rem===0&&x.done<x.total);
+  let restSec=0;a.steps.slice(start).forEach((s,k,arr)=>{const b=a.plan.blocks[s.b];restSec+=40+(k<arr.length-1?(arr[k+1].b===s.b?(arr[k+1].r===s.r?b.restIn||0:b.rest):b.rest+30):0);});
+  const names=x=>x.b.items.map(it=>`<b>${esc(XX(it.exId).name)}</b> <span class="muted small">${XX(it.exId).nr?'#'+esc(XX(it.exId).nr):''}</span>`).join(' + ');
+  const kind=x=>x.b.kind==='single'?'':` <span class="tag">${x.b.kind==='superset'?'Supersatz':'Zirkel'}</span>`;
+  const plan=x=>x.b.items.map(it=>`${x.b.rounds}×${esc(it.reps)} · ${fmtW(it.weight)}`).join(' / ');
+  const logged=x=>x.logs.filter(l=>l.sets.length).map(l=>l.sets.map(z=>fmtW(z.w).replace(' kg','')+'×'+esc(z.reps)).join(' · ')).join(' / ');
+  const row=(x,mode)=>{
+    const isCur=mode==='up'&&x.bi===cb;
+    return `<div class="pick ${mode==='done'?'dim':''}" style="${isCur?'border-color:var(--accent)':''}"><div class="row between"><div class="grow">${mode==='done'?'✓ ':isCur?'▶ ':''}${names(x)}${kind(x)}</div><span class="small muted">${x.done}/${x.total}</span></div>
+    <div class="small muted sets">${x.done?'Heute: '+logged(x):plan(x)}${x.done&&mode==='up'?' · noch '+x.rem+' Sätze':''}</div>
+    ${mode==='up'&&!isCur?`<div class="row" style="margin-top:8px"><button class="btn sm" onclick="doNow(${x.bi})">Jetzt machen (Gerät frei)</button></div>`:''}
+    ${mode==='skip'?`<div class="row" style="margin-top:8px"><button class="btn sm" onclick="redo(${x.bi})">Doch noch machen</button></div>`:''}</div>`;};
+  let h=`<div class="row between"><h1 style="margin:0">Übersicht</h1><button class="btn sm" onclick="closeSheet()">Schließen</button></div>
+  <p class="small muted">${doneL.length} erledigt · ${upL.length} offen · noch ≈ ${Math.max(1,Math.round(restSec/60))} min · läuft seit ${Math.round((Date.now()-a.startedAt)/60000)} min</p>`;
+  if(doneL.length)h+=`<h2>Erledigt</h2>`+doneL.map(x=>row(x,'done')).join('');
+  h+=`<h2>Jetzt & als Nächstes</h2>`;
+  if(a.phase==='warm')h+=`<div class="pick" style="border-color:var(--accent)">▶ <b>Aufwärmen</b> <span class="small muted">${a.plan.warmup.min} min</span></div>`;
+  h+=upL.map(x=>row(x,'up')).join('');
+  if(skipL.length)h+=`<h2>Übersprungen</h2>`+skipL.map(x=>row(x,'skip')).join('');
+  openSheet(h);
+  const c=document.querySelector('#sheetBody .pick[style*=accent]');if(c&&doneL.length)c.scrollIntoView({block:'center'});
+}
+function doNow(bi){
+  const a=S.active,start=remStart(a),rem=a.steps.slice(start);
+  a.steps=a.steps.slice(0,start).concat(rem.filter(s=>s.b===bi),rem.filter(s=>s.b!==bi));
+  if(a.phase==='set')enterStep();
+  save();closeSheet();render();toast(XX(a.plan.blocks[bi].items[0].exId).name+' kommt jetzt dran');
+}
+function redo(bi){
+  const a=S.active,b=a.plan.blocks[bi],add=[];
+  for(let r=0;r<b.rounds;r++)b.items.forEach((it,ii)=>{const n=Object.values(a.log).filter(l=>l.b===bi&&l.i===ii).reduce((k,l)=>k+l.sets.length,0);if(r>=n)add.push({t:'set',b:bi,i:ii,r});});
+  if(!add.length)return;a.steps=a.steps.concat(add);save();overview();toast('Wieder eingeplant – kommt am Ende');
+}
 function later(){
   const {a,st}=cur(),rem=a.steps.slice(a.idx),mine=rem.filter(s=>s.b===st.b),oth=rem.filter(s=>s.b!==st.b);
   if(!oth.length)return toast('Keine andere Station mehr übrig');
@@ -753,7 +800,7 @@ function vSettings(){
   <button class="btn big" style="margin-top:12px" onclick="resetRx()">Trainer-Vorgaben neu laden</button>
   <p class="small muted">Setzt Sätze, Wdh.-Bereiche und Tipps deiner Startgeräte auf die Trainer-Werte zurück. Gewichte und Verlauf bleiben.</p>
   <button class="btn big danger" style="margin-top:4px" onclick="resetAll()">Alles zurücksetzen</button></div>
-  <p class="small muted center">Trainingscoach · Version 1.6</p>`;
+  <p class="small muted center">Trainingscoach · Version 1.7</p>`;
 }
 function saveSettings(){
   const g=id=>document.getElementById(id),st=S.settings;
