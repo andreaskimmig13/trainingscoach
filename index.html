@@ -187,8 +187,13 @@ function stepper(val,minus,plus,cls='',valClick=''){return `<div class="stepper 
 /* ================= Regel-Trainer ================= */
 function restFor(e){if(e.rest)return e.rest;if(e.cat==='rumpf')return 45;if(e.type==='iso')return 60;if(e.knee&&+e.reps>=15)return 75;return (+e.reps<=8)?120:90;}
 function single(e){return {kind:'single',rounds:e.sets,rest:restFor(e),restIn:0,items:[{exId:e.id,reps:repStr(e),weight:e.weight,hint:''}]};}
-function blockSec(b){const n=b.items.length;return b.rounds*n*40+b.rounds*(n-1)*(b.restIn||0)+(b.rounds-1)*b.rest+45+(b.warmupSet?100:0);}
-function planSec(p){return p.warmup.min*60+p.blocks.reduce((s,b)=>s+blockSec(b),0);}
+/* Zeitschätzung – dieselbe Formel für Planung und Live-Anzeige:
+   Satzdauer ≈ 10 s Einstellen + 3 s pro Wdh.; nach jedem Satz die Pause (die letzte Pause einer Station = Gerätewechsel) */
+function setSec(reps){const r=parseRange(reps);const m=r?(r[0]+r[1])/2:12;return clamp(Math.round(10+3*m),30,80);}
+function stepsSec(plan,steps){let t=0;steps.forEach((s,k)=>{const b=plan.blocks[s.b];if(!b)return;const it=b.items[s.i]||b.items[0];t+=s.ws?55:setSec(it.reps);
+  if(k<steps.length-1){const n=steps[k+1];t+=s.ws?60:(n.b===s.b&&n.r===s.r)?(b.restIn||0):b.rest;}});return t;}
+function blockSec(b){let t=0;if(b.warmupSet)t+=55+60;for(let r=0;r<b.rounds;r++)b.items.forEach((it,ii)=>{t+=setSec(it.reps)+(ii<b.items.length-1?(b.restIn||0):b.rest);});return t;}
+function planSec(p){return p.warmup.min*60+stepsSec(p,buildSteps(p).filter(s=>s.t==='set'));}
 const prioOf=e=>e.prio*10-(e.knee?1:0);
 const catOf=b=>XX(b.items[0].exId).cat;
 const isCompound=b=>XX(b.items[0].exId).type==='mehr';
@@ -269,7 +274,7 @@ Feste Regeln:
 - Ober- und Unterkörper abwechseln, Rumpf am Ende. Orientiere dich an standard_reihenfolge (vom Trainer festgelegt) und begründe Abweichungen.
 - Basis sind die Trainer-Vorgaben (standard = Sätze x Wdh.-Bereich, doppelte Progression). reps darf ein Bereich wie "10–12" sein.
 - Pausen in Sekunden legst du passend zu Übung und Satzschema fest (rest = nach jedem Satz bzw. jeder Runde, restIn = zwischen Geräten innerhalb eines Supersatzes/Zirkels).
-- Zeitbudget einhalten: Schätzung 40 s pro Satz + Pausen + 45 s Gerätewechsel pro Station + Aufwärmen.
+- Zeitbudget einhalten: Schätzung pro Satz 10 s + 3 s je Wiederholung, nach jedem Satz die Pause (die Pause nach dem letzten Satz einer Station ist der Gerätewechsel), Aufwärmsatz ca. 2 min, plus Aufwärmen.
 - Verwende ausschließlich Geräte-IDs aus der Liste.`;
 const MODE_AI={
   variation:'Basis ist das Standardprogramm. Tausche 2–3 Übungen gegen Alternativen (gleiche Gruppe oder Kategorie) und variiere bei 1–2 Übungen Satzschema oder Tempo. Bleib nah am Bewährten.',
@@ -332,7 +337,7 @@ function render(){
   document.body.classList.toggle('running',ui.view==='run');
   const f={home:vHome,plan:vPlan,run:vRun,summary:vSummary,devices:vDevices,history:vHistory,settings:vSettings}[ui.view]||vHome;
   app.innerHTML=f();renderTabs();
-  if(ui.view==='run')tick();else clearInterval(timerInt);
+  if(ui.view==='run'){tick();runClock();}else{clearInterval(timerInt);clearInterval(clockInt);}
 }
 const IC={
   home:'<svg viewBox="0 0 24 24"><path d="M6.5 6.5v11M17.5 6.5v11M3 9.5v5M21 9.5v5M6.5 12h11"/></svg>',
@@ -526,7 +531,7 @@ function endEarly(){if(!confirm('Training jetzt beenden und speichern?'))return;
 function vRun(){
   const a=S.active;if(!a){ui.view='home';return vHome();}
   const sets=a.steps.filter(s=>s.t==='set').length,done=a.steps.slice(0,a.idx).filter(s=>s.t==='set').length;
-  const top=`<div class="run-top"><span class="muted small">${done} von ${sets} Sätzen</span><div class="row" style="gap:4px"><button class="btn sm" onclick="overview()">☰ Übersicht</button><button class="btn sm ghost" onclick="endEarly()">Beenden</button></div></div><div class="progress"><i style="width:${sets?done/sets*100:0}%"></i></div>`;
+  const top=`<div class="run-top"><span class="muted small">${done} von ${sets} Sätzen</span><div class="row" style="gap:4px"><button class="btn sm" onclick="overview()">☰ Übersicht</button><button class="btn sm ghost" onclick="endEarly()">Beenden</button></div></div><div class="progress"><i style="width:${sets?done/sets*100:0}%"></i></div>`+clockBar(a);
   if(a.phase==='warm')return top+warmView(a);
   if(a.phase==='rest')return top+restView(a);
   return top+setView();
@@ -601,6 +606,34 @@ function wAdj(d){const {it}=cur();it.weight=r2(Math.max(0,+it.weight+d*stepOf(XX
 function wSet(){const {it}=cur();const v=prompt('Gewicht in kg',it.weight);if(v===null)return;const n=parseFloat(String(v).replace(',','.'));if(isFinite(n)&&n>=0){it.weight=n;save();render();}}
 function rAdj(d){const {it}=cur();const base=ui.reps??parseInt(it.reps);ui.reps=clamp(base+d,0,60);render();}
 function noteIn(v){const {st,it,b}=cur();logFor(st,it,b).note=v;save();}
+/* ===== Zeit: trainiert, Ziel, on track ===== */
+function remainingSec(a){
+  let t=stepsSec(a.plan,a.steps.slice(remStart(a)));
+  if((a.phase==='rest'||a.phase==='warm')&&a.endsAt)t+=Math.max(0,(a.endsAt-Date.now())/1000);
+  return t;
+}
+const fmtClock=sec=>{sec=Math.max(0,Math.floor(sec));const h=Math.floor(sec/3600),m=Math.floor(sec%3600/60),x=sec%60;return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0');};
+function trackInfo(a){
+  const el=(Date.now()-a.startedAt)/1000,target=(a.plan.minutes||60)*60,proj=el+remainingSec(a),d=Math.round((target-proj)/60);
+  const st=Math.abs(d)<=1?{t:'im Plan',c:'var(--accent)'}:d>0?{t:d+' min voraus',c:'var(--accent)'}:{t:(-d)+' min hinterher',c:'var(--warn)'};
+  return {el,target,proj,st};
+}
+function clockBar(a){
+  const t=trackInfo(a);
+  return `<div class="grid3 center" style="margin:-8px 0 14px;gap:0 6px">
+  <div class="card" style="padding:8px 4px;margin:0"><div class="small muted">Trainiert</div><b id="clkEl" style="font-variant-numeric:tabular-nums">${fmtClock(t.el)}</b></div>
+  <div class="card" style="padding:8px 4px;margin:0"><div class="small muted">Ziel</div><b>${Math.round(t.target/60)} min</b></div>
+  <div class="card" style="padding:8px 4px;margin:0"><div class="small muted" id="clkEnd">Ende ≈ ${Math.round(t.proj/60)} min</div><b id="clkSt" style="color:${t.st.c}">${t.st.t}</b></div></div>`;
+}
+let clockInt=null;
+function runClock(){
+  clearInterval(clockInt);
+  clockInt=setInterval(()=>{const a=S.active;if(!a||ui.view!=='run'){clearInterval(clockInt);return;}
+    const t=trackInfo(a),g=id=>document.getElementById(id);
+    if(g('clkEl'))g('clkEl').textContent=fmtClock(t.el);
+    if(g('clkSt')){g('clkSt').textContent=t.st.t;g('clkSt').style.color=t.st.c;}
+    if(g('clkEnd'))g('clkEnd').textContent='Ende ≈ '+Math.round(t.proj/60)+' min';},1000);
+}
 /* ===== Übersicht während des Trainings ===== */
 function remStart(a){return a.phase==='warm'?a.idx+1:a.idx;}
 function blockStatus(a,bi){
@@ -616,7 +649,7 @@ function overview(){
   const doneL=all.filter(x=>x.rem===0&&x.done>=x.total).sort((p,q)=>p.first-q.first);
   const upL=upOrder.map(bi=>all[bi]);
   const skipL=all.filter(x=>x.rem===0&&x.done<x.total);
-  let restSec=0;a.steps.slice(start).forEach((s,k,arr)=>{const b=a.plan.blocks[s.b];restSec+=40+(k<arr.length-1?(arr[k+1].b===s.b?(arr[k+1].r===s.r?b.restIn||0:b.rest):b.rest+30):0);});
+  const restSec=remainingSec(a);
   const names=x=>x.b.items.map(it=>`<b>${esc(XX(it.exId).name)}</b> <span class="muted small">${XX(it.exId).nr?'#'+esc(XX(it.exId).nr):''}</span>`).join(' + ');
   const kind=x=>x.b.kind==='single'?'':` <span class="tag">${x.b.kind==='superset'?'Supersatz':'Zirkel'}</span>`;
   const plan=x=>x.b.items.map(it=>`${x.b.rounds}×${esc(it.reps)} · ${fmtW(it.weight)}`).join(' / ');
@@ -688,7 +721,7 @@ function finish(){
     }
     return {exId:l.exId,name:e?e.name:'?',nr:e?e.nr:'',sets:l.sets,note:l.note.trim(),target:l.target};
   });
-  const sess={id:uid(),date,mode:a.plan.mode,title:a.plan.title,min:Math.round((Date.now()-a.startedAt)/60000),entries};
+  const sess={id:uid(),date,mode:a.plan.mode,title:a.plan.title,min:Math.round((Date.now()-a.startedAt)/60000),target:a.plan.minutes||null,entries};
   if(entries.length)S.sessions.unshift(sess);
   S.summary={sid:sess.id,saved:!!entries.length,sugg,ai:null,applied:{}};
   S.active=null;releaseWake();save();ui.busy=false;go('summary');alarm();
@@ -698,7 +731,7 @@ function vSummary(){
   const s=S.sessions.find(x=>x.id===sm.sid);
   let h=`<h1>${sm.saved?'Stark, geschafft! 💪':'Training beendet'}</h1>`;
   if(!s)return h+`<p class="muted">Es wurden keine Sätze erfasst.</p><button class="btn primary big" onclick="S.summary=null;save();go('home')">Fertig</button>`;
-  h+=`<div class="muted small" style="margin:-6px 0 14px">${fmtDate(s.date)} · ${s.min} min · ${s.entries.length} Übungen · gespeichert</div>`;
+  h+=`<div class="muted small" style="margin:-6px 0 14px">${fmtDate(s.date)} · ${s.min} min${s.target?' (Ziel '+s.target+' min'+(Math.abs(s.min-s.target)<=2?', Punktlandung 🎯':s.min<s.target?', '+(s.target-s.min)+' min früher':', '+(s.min-s.target)+' min länger')+')':''} · ${s.entries.length} Übungen · gespeichert</div>`;
   const sugBox=(list,label)=>list.length?`<h2>${label}</h2>`+list.map((v,i)=>{const e=X(v.exId);if(!e)return '';const key=label+i;const done=sm.applied[key];
     return `<div class="card"><div class="row between"><div class="grow"><b>${esc(e.name)}</b> <span class="muted small">${e.nr?'#'+esc(e.nr):''}</span><div class="small muted">${esc(v.reason)}</div></div>${v.to!==null&&v.to!==undefined?(done?'<span class="tag ai">übernommen</span>':`<button class="btn sm primary" onclick="applySug('${key}','${v.exId}',${v.to})">${fmtW(v.to)}</button>`):''}</div></div>`;}).join(''):'';
   h+=sugBox(sm.sugg,'Vorschläge Regel-Trainer');
@@ -800,7 +833,7 @@ function vSettings(){
   <button class="btn big" style="margin-top:12px" onclick="resetRx()">Trainer-Vorgaben neu laden</button>
   <p class="small muted">Setzt Sätze, Wdh.-Bereiche und Tipps deiner Startgeräte auf die Trainer-Werte zurück. Gewichte und Verlauf bleiben.</p>
   <button class="btn big danger" style="margin-top:4px" onclick="resetAll()">Alles zurücksetzen</button></div>
-  <p class="small muted center">Trainingscoach · Version 1.7</p>`;
+  <p class="small muted center">Trainingscoach · Version 1.8</p>`;
 }
 function saveSettings(){
   const g=id=>document.getElementById(id),st=S.settings;
