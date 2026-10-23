@@ -304,10 +304,7 @@ async function askAITool(system,user,tool,schema,maxTokens){
     try{return parseJSON(txt);}catch(e){}
     throw new Error(j.stop_reason==='max_tokens'?'Antwort zu lang':'Keine strukturierte Antwort');};
   // Manche Modelle erlauben kein erzwungenes Werkzeug -> automatisch auf freie Wahl umschalten und merken
-  const run=async()=>{
-    if(!S.settings.noForceTool){try{return await send(true);}catch(e){if(e.status===400&&/tool_choice/i.test(e.msg||'')){S.settings.noForceTool=st.model;save();}else throw e;}}
-    return await send(false);};
-  if(S.settings.noForceTool&&S.settings.noForceTool!==st.model)S.settings.noForceTool=false;
+  const run=()=>send(false);
   try{return await run();}catch(e){if(e.status&&e.status<500&&e.status!==429)throw e;return await run();}
 }
 const PLAN_TOOL_SCHEMA={type:'object',required:['title','comment','warmup','blocks'],properties:{
@@ -842,7 +839,7 @@ function vSettings(){
   <button class="btn big" style="margin-top:12px" onclick="resetRx()">Trainer-Vorgaben neu laden</button>
   <p class="small muted">Setzt Sätze, Wdh.-Bereiche und Tipps deiner Startgeräte auf die Trainer-Werte zurück. Gewichte und Verlauf bleiben.</p>
   <button class="btn big danger" style="margin-top:4px" onclick="resetAll()">Alles zurücksetzen</button></div>
-  <p class="small muted center">Trainingscoach · Version 1.9</p>`;
+  <p class="small muted center">Trainingscoach · Version 2.0</p>`;
 }
 function saveSettings(){
   const g=id=>document.getElementById(id),st=S.settings;
@@ -878,7 +875,11 @@ async function wake(){try{if('wakeLock' in navigator&&S.active&&document.visibil
 function releaseWake(){try{wl&&wl.release();}catch(e){}wl=null;}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&S.active){wake();if(ui.view==='run')render();}});
 document.addEventListener('click',unlockAudio);
-if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(()=>{});
+if('serviceWorker' in navigator&&location.protocol==='https:'){
+  const hadCtrl=!!navigator.serviceWorker.controller;let reloaded=false;
+  navigator.serviceWorker.addEventListener('controllerchange',()=>{if(hadCtrl&&!reloaded&&!S.active){reloaded=true;location.reload();}});
+  navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(r=>{r.update();document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')r.update();});}).catch(()=>{});
+}
 try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist();}catch(e){}
 if(S.active)wake();
 render();
