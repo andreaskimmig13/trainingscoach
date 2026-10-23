@@ -292,14 +292,23 @@ async function askAI(system,user,maxTokens){
 /* Strukturierte Antwort: Die KI muss über ein Werkzeug mit festem Schema antworten -> immer gültiges JSON */
 async function askAITool(system,user,tool,schema,maxTokens){
   const st=S.settings;if(!st.apiKey)throw new Error('Kein API-Schlüssel');
-  const call=async()=>{
-    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':st.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},
-      body:JSON.stringify({model:st.model,max_tokens:maxTokens,system,tools:[{name:tool,description:'Ergebnis strukturiert übergeben.',input_schema:schema}],tool_choice:{type:'tool',name:tool},messages:[{role:'user',content:user}]})});
-    if(!r.ok){let m='';try{m=(await r.json()).error.message;}catch(e){}const err=new Error('API '+r.status+(m?': '+m:''));err.status=r.status;throw err;}
-    const j=await r.json(),b=(j.content||[]).find(c=>c.type==='tool_use');
-    if(!b||!b.input)throw new Error(j.stop_reason==='max_tokens'?'Antwort zu lang':'Keine strukturierte Antwort');
-    return b.input;};
-  try{return await call();}catch(e){if(e.status&&e.status<500&&e.status!==429)throw e;return await call();}
+  const send=async(force)=>{
+    const body={model:st.model,max_tokens:maxTokens,system:system+(force?'':`\nWICHTIG: Übergib dein Ergebnis ausschließlich durch einen Aufruf des Werkzeugs ${tool}.`),
+      tools:[{name:tool,description:'Ergebnis strukturiert übergeben.',input_schema:schema}],messages:[{role:'user',content:user}]};
+    if(force)body.tool_choice={type:'tool',name:tool};
+    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':st.apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify(body)});
+    if(!r.ok){let m='';try{m=(await r.json()).error.message;}catch(e){}const err=new Error('API '+r.status+(m?': '+m:''));err.status=r.status;err.msg=m;throw err;}
+    const j=await r.json(),b=(j.content||[]).find(c=>c.type==='tool_use'&&c.input);
+    if(b)return b.input;
+    const txt=(j.content||[]).filter(c=>c.type==='text').map(c=>c.text).join('');
+    try{return parseJSON(txt);}catch(e){}
+    throw new Error(j.stop_reason==='max_tokens'?'Antwort zu lang':'Keine strukturierte Antwort');};
+  // Manche Modelle erlauben kein erzwungenes Werkzeug -> automatisch auf freie Wahl umschalten und merken
+  const run=async()=>{
+    if(!S.settings.noForceTool){try{return await send(true);}catch(e){if(e.status===400&&/tool_choice/i.test(e.msg||'')){S.settings.noForceTool=st.model;save();}else throw e;}}
+    return await send(false);};
+  if(S.settings.noForceTool&&S.settings.noForceTool!==st.model)S.settings.noForceTool=false;
+  try{return await run();}catch(e){if(e.status&&e.status<500&&e.status!==429)throw e;return await run();}
 }
 const PLAN_TOOL_SCHEMA={type:'object',required:['title','comment','warmup','blocks'],properties:{
   title:{type:'string',description:'kurzer Name der Einheit'},comment:{type:'string',description:'2–3 Sätze Begründung, du-Form'},
@@ -833,7 +842,7 @@ function vSettings(){
   <button class="btn big" style="margin-top:12px" onclick="resetRx()">Trainer-Vorgaben neu laden</button>
   <p class="small muted">Setzt Sätze, Wdh.-Bereiche und Tipps deiner Startgeräte auf die Trainer-Werte zurück. Gewichte und Verlauf bleiben.</p>
   <button class="btn big danger" style="margin-top:4px" onclick="resetAll()">Alles zurücksetzen</button></div>
-  <p class="small muted center">Trainingscoach · Version 1.8</p>`;
+  <p class="small muted center">Trainingscoach · Version 1.9</p>`;
 }
 function saveSettings(){
   const g=id=>document.getElementById(id),st=S.settings;
