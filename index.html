@@ -598,6 +598,29 @@ function warmView(a){
   ${fe?`<div class="card next" style="margin-top:12px"><div class="muted small">Danach</div><b>${esc(fe.name)}</b> <span class="muted">${fe.nr?'#'+esc(fe.nr):''}</span></div>`:''}
   <button class="btn primary big" onclick="warmDone()">Aufwärmen fertig</button>`;
 }
+/* ===== Wiederholungen vom letzten Mal & Steigerungshinweis ===== */
+function lastHist(e,reps){const h=(e.hist||[]);for(let i=h.length-1;i>=0;i--){const x=h[i];if(x.t?x.t===String(reps):String(reps)===repStr(e))return x;}return null;}
+function defaultReps(e,it,L){
+  const lo=parseInt(it.reps);if(isNaN(lo))return null;const k=L.sets.length,h=lastHist(e,it.reps);
+  if(h&&h.reps&&h.reps.length&&+it.weight<=+h.w){const v=parseInt(h.reps[Math.min(k,h.reps.length-1)]);if(!isNaN(v))return v;}
+  if(h&&+it.weight>+h.w)return lo;
+  if(k&&+L.sets[k-1].w===+it.weight){const v=parseInt(L.sets[k-1].reps);if(!isNaN(v))return v;}
+  return lo;
+}
+function incHint(a,st,b,it,e,L){
+  if(!(+it.weight>0))return '';if(e.knee&&painful(e.note))return '';
+  const rg=parseRange(it.reps);if(!rg)return '';const top=rg[1],next=r2(+it.weight+stepOf(e)),k=L.sets.length;a.hintOff=a.hintOff||{};
+  let key,msg;
+  if(!k){const h=lastHist(e,it.reps);
+    if(h&&+h.w===+it.weight&&h.reps.length>=b.rounds&&h.reps.every(r=>+r>=top)){key=st.b+'-'+st.i+'-h';msg=`Letztes Mal ${h.reps.join(' · ')} Wdh. mit ${fmtW(h.w)} – alle Sätze an der Obergrenze. Heute ${fmtW(next)} probieren und wieder bei ${rg[0]} Wdh. starten?`;}}
+  else{const last=L.sets[k-1];
+    if(+last.w===+it.weight&&+last.reps>=top+3){key=st.b+'-'+st.i+'-s'+k;msg=`Satz ${k} mit ${last.reps} Wdh. lag deutlich über dem Ziel (${it.reps}). Nächsten Satz mit ${fmtW(next)}?`;}}
+  if(!key||a.hintOff[key])return '';
+  return `<div class="card hl small"><b>📈 Trainer: Steigerung sinnvoll</b><div style="margin-top:4px">${esc(msg)}${e.knee?' Nur, wenn sich das Knie gut anfühlt.':''}</div>
+  <div class="row" style="gap:8px;margin-top:10px"><button class="btn primary sm grow" onclick="incApply('${key}',${next})">Auf ${fmtW(next)} erhöhen</button><button class="btn sm grow" onclick="incOff('${key}')">So lassen</button></div></div>`;
+}
+function incApply(key,w){const {a,it}=cur();it.weight=w;(a.hintOff=a.hintOff||{})[key]=1;ui.reps=null;save();render();toast('Gewicht für heute auf '+fmtW(w));}
+function incOff(key){const a=S.active;(a.hintOff=a.hintOff||{})[key]=1;save();render();}
 function setView(){
   const {a,st,b,it}=cur(),e=XX(it.exId),L=logFor(st,it,b);
   if(st.ws)return `<div class="muted small">${e.nr?'Gerät-Nr. '+esc(e.nr):''}</div><h1 class="ex-title">${esc(e.name)}</h1><div class="setno">Aufwärmsatz</div>
@@ -606,12 +629,14 @@ function setView(){
   ${e.note?`<div class="card small"><span class="muted">Notiz vom letzten Mal:</span> ${esc(e.note)}</div>`:''}
   <button class="btn primary huge" onclick="setDone()">✓ Aufwärmsatz fertig</button>
   <div class="row" style="gap:8px;margin-top:12px"><button class="btn grow sm" onclick="later()">Belegt → später</button><button class="btn grow sm" onclick="replaceInSession()">Ersetzen</button><button class="btn grow sm" onclick="skipWarmupSet()">Ohne Aufwärmsatz</button></div>`;
-  const tgt=parseInt(it.reps),reps=ui.reps??(isNaN(tgt)?null:tgt),multi=b.kind!=='single';
+  const reps=ui.reps??defaultReps(e,it,L),multi=b.kind!=='single',lh=st.r===0&&!L.sets.length?lastHist(e,it.reps):null;
   return `<div class="muted small">${multi?(b.kind==='superset'?'Supersatz':'Zirkel')+' · Gerät '+(st.i+1)+' von '+b.items.length+' · ':''}${e.nr?'Gerät-Nr. '+esc(e.nr):''}</div>
   <h1 class="ex-title">${esc(e.name)}</h1>
   <div class="setno">${multi?'Runde':'Satz'} ${st.r+1} von ${b.rounds}</div>
   <div class="card"><div class="row between"><span class="muted">Gewicht</span>${stepper(fmtW(it.weight),'wAdj(-1)','wAdj(1)','lg','wSet()')}</div>
   <div class="row between" style="margin-top:12px"><span class="muted">Wdh.${/\D/.test(it.reps)&&parseRange(it.reps)?'<br><span class="small">Ziel '+esc(it.reps)+'</span>':''}</span>${reps!==null?stepper(reps,'rAdj(-1)','rAdj(1)','lg'):`<b style="font-size:22px">${esc(it.reps)}</b>`}</div></div>
+  ${lh?`<div class="small muted sets" style="margin:-4px 0 10px">Letztes Mal (${new Date(lh.d).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'})}): ${fmtW(lh.w)} × ${lh.reps.map(esc).join(' · ')}</div>`:''}
+  ${incHint(a,st,b,it,e,L)}
   ${it.hint?`<div class="card small">💡 ${esc(it.hint)}</div>`:''}
   ${e.cue&&st.r===0?`<div class="card small"><span class="muted">Trainer-Tipp:</span> ${esc(e.cue)}</div>`:''}
   ${e.note?`<div class="card small"><span class="muted">Notiz vom letzten Mal:</span> ${esc(e.note)}</div>`:''}
@@ -642,8 +667,8 @@ function tick(){
 }
 function setDone(){
   unlockAudio();
-  const {a,st,b,it}=cur(),tgt=parseInt(it.reps);
-  if(!st.ws)logFor(st,it,b).sets.push({w:+it.weight,reps:ui.reps??(isNaN(tgt)?it.reps:tgt)});ui.reps=null;
+  const {a,st,b,it}=cur();
+  if(!st.ws){const L=logFor(st,it,b),d=defaultReps(XX(it.exId),it,L);L.sets.push({w:+it.weight,reps:ui.reps??(d===null?it.reps:d)});}ui.reps=null;
   const next=a.steps[a.idx+1];a.idx++;
   if(!next){finish();return;}
   if(next.t==='cool'){if(enterStep()){save();render();window.scrollTo(0,0);}return;}
@@ -657,7 +682,7 @@ function restSkip(){if(enterStep()){save();render();}}
 function restAdd(d){const a=S.active;a.endsAt+=d*1000;a.restTotal=Math.max(1,a.restTotal+d);save();tick();}
 function wAdj(d){const {it}=cur();it.weight=r2(Math.max(0,+it.weight+d*stepOf(XX(it.exId))));save();render();}
 function wSet(){const {it}=cur();const v=prompt('Gewicht in kg',it.weight);if(v===null)return;const n=parseFloat(String(v).replace(',','.'));if(isFinite(n)&&n>=0){it.weight=n;save();render();}}
-function rAdj(d){const {it}=cur();const base=ui.reps??parseInt(it.reps);ui.reps=clamp(base+d,0,60);render();}
+function rAdj(d){const {st,b,it}=cur();const base=ui.reps??defaultReps(XX(it.exId),it,logFor(st,it,b));if(base===null)return;ui.reps=clamp(base+d,0,60);render();}
 function noteIn(v){const {st,it,b}=cur();logFor(st,it,b).note=v;save();}
 /* ===== Zeit: trainiert, Ziel, on track ===== */
 function remainingSec(a){
@@ -762,7 +787,7 @@ function finish(){
   const entries=logs.map(l=>{
     const e=X(l.exId);
     if(e){
-      if(l.sets.length){const w=l.sets[l.sets.length-1].w;e.hist.push({d:day,w,reps:l.sets.map(s=>s.reps)});
+      if(l.sets.length){const w=l.sets[l.sets.length-1].w;e.hist.push({d:day,w,reps:l.sets.map(s=>s.reps),t:String(l.target)});
         if(String(l.target)===repStr(e))e.weight=w;
         const rg=parseRange(l.target),std=String(l.target)===repStr(e),full=l.sets.length>=l.rounds;
         const atTop=rg&&full&&l.sets.every(s=>+s.reps>=rg[1]),tooHeavy=rg&&l.sets.some(s=>+s.reps<rg[0]-2);
@@ -967,7 +992,7 @@ function vSettings(){
   <button class="btn big" style="margin-top:12px" onclick="resetRx()">Trainer-Vorgaben neu laden</button>
   <p class="small muted">Setzt Sätze, Wdh.-Bereiche und Tipps deiner Startgeräte auf die Trainer-Werte zurück. Gewichte und Verlauf bleiben.</p>
   <button class="btn big danger" style="margin-top:4px" onclick="resetAll()">Alles zurücksetzen</button></div>
-  <p class="small muted center">Trainingscoach · Version 2.2</p>`;
+  <p class="small muted center">Trainingscoach · Version 2.3</p>`;
 }
 function saveSettings(){
   const g=id=>document.getElementById(id),st=S.settings;
