@@ -124,20 +124,20 @@ const COOL_SEC=COOL.reduce((t,c)=>t+c.sec+5,0);
 function seed(){
   const e=(name,nr,cat,type,group,sets,reps,weight,start,o={})=>({id:uid(),name,nr,cat,type,group,sets,reps,weight,startWeight:start,knee:!!o.knee,prio:o.prio||2,rest:null,note:o.note||'',active:true,hist:[],order:trainerOrder({name,nr,cat})});
   return {v:1,settings:defaultSettings(),sessions:[],active:null,draft:null,summary:null,exercises:[
-    e('Beindrücken','3031','beine','mehr','Oberschenkel vorne',3,10,69,77,{knee:true,prio:1,note:'Rechtes Knie: Schmerzen nach 2. Durchgang mit 85 kg'}),
-    e('Beinstrecker','3001','beine','iso','Oberschenkel vorne',3,10,30,30,{knee:true,prio:1}),
-    e('Beinbeuger','3003','beine','iso','Beinbeuger',3,12,45,45,{knee:true,prio:1}),
-    e('Beinbeuger','3002','beine','iso','Beinbeuger',3,12,25,25,{knee:true,prio:1}),
-    e('Abduktoren','3028','beine','iso','Hüfte',2,12,60,50,{knee:true}),
-    e('Adduktoren','3029','beine','iso','Hüfte',2,12,35,35,{knee:true}),
-    e('Brustpresse','3016','druecken','mehr','Brust',3,8,40,35,{prio:1}),
-    e('Schrägbank','3023','druecken','mehr','Brust',3,10,25,25),
+    e('Beindrücken','3031','beine','mehr','Oberschenkel vorne',3,10,0,0,{knee:true,prio:1}),
+    e('Beinstrecker','3001','beine','iso','Oberschenkel vorne',3,10,0,0,{knee:true,prio:1}),
+    e('Beinbeuger','3003','beine','iso','Beinbeuger',3,12,0,0,{knee:true,prio:1}),
+    e('Beinbeuger','3002','beine','iso','Beinbeuger',3,12,0,0,{knee:true,prio:1}),
+    e('Abduktoren','3028','beine','iso','Hüfte',2,12,0,0,{knee:true}),
+    e('Adduktoren','3029','beine','iso','Hüfte',2,12,0,0,{knee:true}),
+    e('Brustpresse','3016','druecken','mehr','Brust',3,8,0,0,{prio:1}),
+    e('Schrägbank','3023','druecken','mehr','Brust',3,10,0,0),
     e('Schulterpresse','','druecken','mehr','Schulter',3,10,0,0,{prio:3}),
-    e('Rückenzug','3020','ziehen','mehr','Latzug',3,10,70,55,{prio:1}),
-    e('Ruder','3040','ziehen','mehr','Rudern',3,10,40,30),
-    e('Bauch','3037','rumpf','iso','Bauch',3,12,45,40,{prio:1}),
-    e('Klappsitz','3008','rumpf','iso','Bauch',3,12,50,50),
-    e('Rückenstrecker','','rumpf','iso','Rückenstrecker',3,12,50,35,{prio:1})
+    e('Rückenzug','3020','ziehen','mehr','Latzug',3,10,0,0,{prio:1}),
+    e('Ruder','3040','ziehen','mehr','Rudern',3,10,0,0),
+    e('Bauch','3037','rumpf','iso','Bauch',3,12,0,0,{prio:1}),
+    e('Klappsitz','3008','rumpf','iso','Bauch',3,12,0,0),
+    e('Rückenstrecker','','rumpf','iso','Rückenstrecker',3,12,0,0,{prio:1})
   ]};
 }
 /* Trainer-Reihenfolge: sanfter Einstieg (Hüfte, Oberkörper-Zug, Beinbeuger), Beinpresse erst als 5. Station,
@@ -150,19 +150,19 @@ function trainerOrder(e){const k=TRAINER_ORDER[(e.nr||'').trim()]??TRAINER_ORDER
   const firstCore=Math.min(...list.filter(x=>x.cat==='rumpf').map(x=>x.order||999),999);return firstCore-1;}
 /* Trainer-Vorgaben: Sätze × Wdh.-Bereich (doppelte Progression) + Ausführungstipp */
 const RX={
- '3028':{base:[60,12],sets:2,reps:15,repsMax:20,wf:.9,cue:'Aufrecht sitzen, langsam öffnen, 2 s zurück – nicht zurückschnellen lassen.'},
+ '3028':{sets:2,reps:15,repsMax:20,wf:.9,cue:'Aufrecht sitzen, langsam öffnen, 2 s zurück – nicht zurückschnellen lassen.'},
  '3020':{sets:3,reps:10,repsMax:12,cue:'Brust raus, Stange zur oberen Brust, Schulterblätter aktiv nach unten ziehen – Schultern nicht Richtung Ohren.'},
- '3003':{base:[45,12],sets:3,reps:12,repsMax:15,wf:.9,cue:'Becken fest ins Polster, kontrolliert beugen, 3 s zurück.'},
- '3002':{base:[25,12],sets:3,reps:12,repsMax:15,wf:.9,cue:'Becken fest ins Polster, kontrolliert beugen, 3 s zurück.'},
+ '3003':{sets:3,reps:12,repsMax:15,wf:.9,cue:'Becken fest ins Polster, kontrolliert beugen, 3 s zurück.'},
+ '3002':{sets:3,reps:12,repsMax:15,wf:.9,cue:'Becken fest ins Polster, kontrolliert beugen, 3 s zurück.'},
  '3016':{sets:3,reps:10,repsMax:12,cue:'Griffe auf Brusthöhe, Schulterblätter zusammen, Ellbogen leicht unter Schulterhöhe.'},
  '3097':{sets:3,reps:10,repsMax:12,cue:'Sitz so einstellen, dass die Griffe auf Brusthöhe sind. Schulterblätter zurück und tief, Griffe nach vorne-innen zusammenführen, vorne kurz die Brust anspannen, 2–3 s zurück. Schultern nicht hochziehen.'},
  '3023':{sets:3,reps:10,repsMax:12,cue:'Schulterblätter fixiert, kontrolliert zurück, nicht abfedern.'},
- '3031':{base:[69,11],sets:3,reps:15,repsMax:20,wf:.8,cue:'Leichteres Gewicht, dafür gleichmäßig: Knie über die Fußspitzen, oben nicht ganz durchstrecken, 3 s ablassen. Bei Knieschmerz Bewegung verkürzen.'},
- '3040':{sets:3,reps:10,repsMax:12,cue:'Brust ans Polster, Schultern tief (weg von den Ohren), Ellbogen eng nach hinten, Schulterblätter zusammenziehen – deine wichtigste Übung gegen Nackenverspannung.'},
+ '3031':{sets:3,reps:15,repsMax:20,wf:.8,cue:'Leichteres Gewicht, dafür gleichmäßig: Knie über die Fußspitzen, oben nicht ganz durchstrecken, 3 s ablassen. Bei Knieschmerz Bewegung verkürzen.'},
+ '3040':{sets:3,reps:10,repsMax:12,cue:'Brust ans Polster, Schultern tief (weg von den Ohren), Ellbogen eng nach hinten, Schulterblätter zusammenziehen – eine der wichtigsten Übungen gegen Nackenverspannung.'},
  'reverse butterfly':{sets:3,reps:12,repsMax:15,cue:'Brust ans Polster, Arme leicht gebeugt nach hinten-außen führen, Schulterblätter zusammen, Schultern tief. Leichtes Gewicht, 2 s zurück.'},
- '3001':{base:[30,10],sets:3,reps:15,repsMax:20,wf:.8,cue:'Polster knapp über dem Fußgelenk, oben 1 s halten, 3 s ablassen. Leicht beginnen, schmerzfrei bleiben.'},
+ '3001':{sets:3,reps:15,repsMax:20,wf:.8,cue:'Polster knapp über dem Fußgelenk, oben 1 s halten, 3 s ablassen. Leicht beginnen, schmerzfrei bleiben.'},
  'schulterpresse':{sets:3,reps:10,repsMax:12,cue:'Rücken fest anlehnen, kein Hohlkreuz, Schultern tief halten. Bei Nackenverspannung leichter oder weglassen.'},
- '3029':{base:[35,12],sets:2,reps:15,repsMax:20,wf:.9,cue:'Langsam schließen, kurz halten, kontrolliert öffnen.'},
+ '3029':{sets:2,reps:15,repsMax:20,wf:.9,cue:'Langsam schließen, kurz halten, kontrolliert öffnen.'},
  '3037':{sets:3,reps:12,repsMax:15,cue:'Beim Einrollen ausatmen, Bewegung aus dem Bauch, nicht mit den Armen ziehen.'},
  '3008':{sets:3,reps:12,repsMax:15,cue:'Langsam einrollen, unten nicht ablegen – Spannung halten.'},
  'rückenstrecker':{sets:3,reps:12,repsMax:15,cue:'Langsam aufrichten bis zur geraden Haltung, nicht überstrecken.'}
@@ -181,8 +181,8 @@ function migrate(s){s.settings=Object.assign(defaultSettings(),s.settings||{});i
         note:'Im Studio suchen (gym80 „Butterfly Reverse“). Gerätenummer und ein leichtes Startgewicht eintragen, dann „Aktiv“ anhaken. Alternative: Face Pulls am Kabelzug.',cue:r.cue,active:false,hist:[],order:65});}
   }
   if((s.rx||0)<5&&!s.exercises.some(e=>(e.nr||'').trim()==='3097')){const r=RX['3097'];
-    s.exercises.push({id:uid(),name:'Inner Chest Press',nr:'3097',cat:'druecken',type:'mehr',group:'Brust',sets:r.sets,reps:r.reps,repsMax:r.repsMax,weight:30,startWeight:30,knee:false,prio:2,rest:null,
-      note:'Station 23 im Studio. Startgewicht 30 kg ist geschätzt – beim ersten Satz anpassen.',cue:r.cue,active:true,hist:[],order:42});}
+    s.exercises.push({id:uid(),name:'Inner Chest Press',nr:'3097',cat:'druecken',type:'mehr',group:'Brust',sets:r.sets,reps:r.reps,repsMax:r.repsMax,weight:0,startWeight:null,knee:false,prio:2,rest:null,
+      note:'Startgewicht beim ersten Satz eintragen.',cue:r.cue,active:true,hist:[],order:42});}
   s.rx=5;return s;}
 function load(){try{const s=JSON.parse(localStorage.getItem(STORE));if(s&&Array.isArray(s.exercises))return migrate(s);}catch(e){}return migrate(seed());}
 let S=load();save();
@@ -992,7 +992,7 @@ function vSettings(){
   <button class="btn big" style="margin-top:12px" onclick="resetRx()">Trainer-Vorgaben neu laden</button>
   <p class="small muted">Setzt Sätze, Wdh.-Bereiche und Tipps deiner Startgeräte auf die Trainer-Werte zurück. Gewichte und Verlauf bleiben.</p>
   <button class="btn big danger" style="margin-top:4px" onclick="resetAll()">Alles zurücksetzen</button></div>
-  <p class="small muted center">Trainingscoach · Version 2.3</p>`;
+  <p class="small muted center">Trainingscoach · Version 2.4</p>`;
 }
 function saveSettings(){
   const g=id=>document.getElementById(id),st=S.settings;
