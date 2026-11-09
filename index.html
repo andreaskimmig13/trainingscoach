@@ -108,7 +108,7 @@ const MODES={
 };
 const MODELS=[['claude-sonnet-5-5','Sonnet 5.5 (empfohlen)'],['claude-haiku-5-5','Haiku 5.5 (günstig)'],['claude-opus-5-5','Opus 5.5 (am stärksten)']];
 
-function defaultSettings(){return {apiKey:'',model:'claude-sonnet-5-5',warmup:8,warmupText:'Rad oder Crosstrainer, locker steigernd',step:5,cooldown:true,backup:{url:'',key:'',last:'',err:''}};}
+function defaultSettings(){return {apiKey:'',model:'claude-sonnet-5-5',warmup:8,warmupText:'Rad oder Crosstrainer, locker steigernd',step:5,cooldown:true,backup:{code:'',last:'',err:''}};}
 /* Cool-down Nacken & Schultern – geführt, ohne Geräte, auf einer Bank oder einem Sitz */
 const COOL=[
  {n:'Schultern kreisen',sec:30,t:'Aufrecht hinsetzen, Arme hängen locker. Schultern langsam und groß nach hinten kreisen: hoch, zurück, tief nach unten. Beim Runtersinken ausatmen.'},
@@ -975,22 +975,25 @@ function vHistory(){
 function delSession(id){if(!confirm('Diesen Eintrag löschen?'))return;S.sessions=S.sessions.filter(s=>s.id!==id);save();render();}
 
 /* ================= Automatisches Backup (Google Drive über die App-Backup-Brücke) ================= */
+// Backup-Code: <Brücken-Adresse>#<Brücken-Schlüssel>[#<Geheimnis der Rechnungsmappe>] – ein Code für beide Apps.
 var bkTimer=null,bkBusy=false;
-function bkCfg(){if(!S.settings.backup)S.settings.backup=defaultSettings().backup;return S.settings.backup;}
-function bkOn(){const b=bkCfg();return !!(b.url&&b.key);}
+function bkCfg(){const b=S.settings.backup;if(!b||typeof b!=='object'||!('code' in b))S.settings.backup={code:'',last:'',err:''};return S.settings.backup;}
+function parseCode(c){const parts=String(c||'').trim().split('#');const url=parts[0]||'',key=parts[1]||'';
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/[^/?#]+\/exec$/.test(url)||key.length<20)return null;return {url,key};}
+function bkOn(){return !!parseCode(bkCfg().code);}
 function fmtDT(iso){return iso?new Date(iso).toLocaleString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';}
 function scheduleBackup(){if(!S||!bkOn()||S.active)return;clearTimeout(bkTimer);bkTimer=setTimeout(()=>runBackup(false),30000);}
-function backupCopy(){const c=JSON.parse(JSON.stringify(S));c.settings.apiKey='';c.settings.backup=defaultSettings().backup;c.active=null;return c;}
-async function bridge(body){
-  const b=bkCfg();let r;
-  try{r=await fetch(b.url,{method:'POST',body:JSON.stringify(Object.assign({key:b.key,app:'trainingscoach'},body))});}
-  catch(e){throw new Error('Brücke nicht erreichbar. Internet und Adresse prüfen.');}
-  const t=await r.text();let j;try{j=JSON.parse(t);}catch(e){throw new Error('Die Brücke antwortet nicht wie erwartet. Die Adresse muss auf /exec enden.');}
-  if(j.error)throw new Error(j.error);return j;
+function backupCopy(){const c=JSON.parse(JSON.stringify(S));c.settings.apiKey='';c.settings.backup={code:'',last:'',err:''};c.active=null;return c;}
+async function bridge(body,code){
+  const c=parseCode(code||bkCfg().code);if(!c)throw new Error('Der Backup-Code ist unvollständig');let r;
+  try{r=await fetch(c.url,{method:'POST',body:JSON.stringify(Object.assign({key:c.key,app:'trainingscoach'},body))});}
+  catch(e){throw new Error('Brücke nicht erreichbar. Internetverbindung prüfen.');}
+  const t=await r.text();let j;try{j=JSON.parse(t);}catch(e){throw new Error('Die Brücke antwortet nicht wie erwartet. Backup-Code prüfen.');}
+  if(j.error)throw new Error(j.error==='Falscher Schlüssel'?'Der Backup-Code passt nicht zur Brücke':j.error);return j;
 }
 function storeQuiet(){try{localStorage.setItem(STORE,JSON.stringify(S));}catch(e){}}
 async function runBackup(manual){
-  if(!bkOn()){if(manual)toast('Bitte zuerst Adresse und Schlüssel der Brücke eintragen');return;}
+  if(!bkOn()){if(manual)toast('Bitte zuerst den Backup-Code eintragen');return;}
   if(bkBusy)return;
   if(!navigator.onLine){if(manual)toast('Du bist offline – das Backup läuft, sobald du wieder online bist');return;}
   bkBusy=true;
@@ -999,24 +1002,22 @@ async function runBackup(manual){
   finally{bkBusy=false;storeQuiet();if(manual&&ui.view==='settings')render();}
 }
 async function saveBridge(){
-  const g=id=>document.getElementById(id),b=bkCfg();
-  const url=g('b_url').value.trim(),key=g('b_key').value.trim();
-  if(url&&!/^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(url)){toast('Die Adresse muss mit https://script.google.com/macros/s/ beginnen und auf /exec enden');return;}
-  b.url=url;b.key=key;b.err='';storeQuiet();
-  if(!url||!key){toast('Automatisches Backup ausgeschaltet');render();return;}
-  try{await bridge({action:'test'});toast('✓ Brücke erreichbar');await runBackup(true);}
+  const code=(document.getElementById('b_code').value||'').trim(),b=bkCfg();
+  if(code&&!parseCode(code)){toast('Der Code ist unvollständig. Bitte komplett einfügen.');return;}
+  b.code=code;b.err='';storeQuiet();
+  if(!code){toast('Automatisches Backup ausgeschaltet');render();return;}
+  try{await bridge({action:'test'});toast('✓ Verbunden');await runBackup(true);}
   catch(e){b.err=e.message;storeQuiet();toast('✗ '+e.message);render();}
 }
 async function restoreBridge(){
-  const g=id=>document.getElementById(id),b=bkCfg();
-  if(g('b_url')&&g('b_key')){b.url=g('b_url').value.trim();b.key=g('b_key').value.trim();}
-  if(!bkOn()){toast('Bitte zuerst Adresse und Schlüssel der Brücke eintragen');return;}
+  const el=document.getElementById('b_code'),b=bkCfg();
+  const code=(el&&el.value.trim())||b.code;
+  if(!parseCode(code)){toast('Bitte zuerst den Backup-Code einfügen');return;}
   if(!confirm('Den neuesten Stand aus Google Drive laden? Geräte, Verlauf und Einstellungen auf diesem Handy werden dadurch ersetzt.'))return;
   toast('Wird geladen …');
   try{
-    const j=await bridge({action:'laden'});const o=JSON.parse(j.daten);if(!Array.isArray(o.exercises))throw new Error('Das Backup ist unvollständig');
-    const keep={apiKey:S.settings.apiKey,backup:Object.assign({},b)};
-    clearTimeout(bkTimer);S=migrate(o);S.settings.apiKey=S.settings.apiKey||keep.apiKey;S.settings.backup=keep.backup;S.settings.backup.err='';
+    const j=await bridge({action:'laden'},code);const o=JSON.parse(j.daten);if(!Array.isArray(o.exercises))throw new Error('Das Backup ist unvollständig');
+    const apiKey=S.settings.apiKey;clearTimeout(bkTimer);S=migrate(o);S.settings.apiKey=S.settings.apiKey||apiKey;S.settings.backup={code,last:j.zeit,err:''};
     storeQuiet();toast('✓ Wiederhergestellt: Stand vom '+fmtDT(j.zeit));ui.view='home';render();
   }catch(e){toast('✗ '+e.message);}
 }
@@ -1036,9 +1037,8 @@ function vSettings(){
   <label class="row" style="margin-top:14px"><input type="checkbox" id="s_cool" ${st.cooldown!==false?'checked':''}> <span>Cool-down Nacken & Brust am Ende (≈ ${Math.round(COOL_SEC/60)} min, geführt)</span></label>
   <button class="btn primary big" style="margin-top:12px" onclick="saveSettings()">Speichern</button></div>
   <h2>Automatisches Backup</h2><div class="card">
-  <p class="small muted" style="margin-top:0">Sichert nach jedem Training in dein Google Drive (Ordner „App-Backups“). Auf einem neuen Handy hier Adresse und Schlüssel eintragen und wiederherstellen.</p>
-  <label class="f" style="margin-top:0">Adresse der Brücke</label><input id="b_url" inputmode="url" autocomplete="off" value="${esc(bkCfg().url)}" placeholder="https://script.google.com/macros/s/…/exec">
-  <label class="f">Schlüssel der Brücke</label><input id="b_key" type="password" autocomplete="off" value="${esc(bkCfg().key)}">
+  <p class="small muted" style="margin-top:0">Sichert nach jedem Training in dein Google Drive (Ordner „App-Backups“). Auf einem neuen Handy den Code einfügen und wiederherstellen. Bewahre den Code im Google Passwortmanager auf.</p>
+  <label class="f" style="margin-top:0">Backup-Code</label><input id="b_code" type="password" autocomplete="off" value="${esc(bkCfg().code)}" placeholder="https://script.google.com/macros/s/…/exec#…">
   <button class="btn primary big" style="margin-top:12px" onclick="saveBridge()">Speichern &amp; testen</button>
   ${bkOn()?`<p class="small" style="margin:12px 0 0">${bkCfg().last?'Letztes Backup: '+fmtDT(bkCfg().last):'Noch kein Backup in Google Drive'}</p>${bkCfg().err?`<p class="small" style="margin:4px 0 0;color:var(--warn)">Letzter Versuch fehlgeschlagen: ${esc(bkCfg().err)}</p>`:''}`:''}
   <div class="row wrap" style="gap:8px;margin-top:12px"><button class="btn grow" onclick="runBackup(true)">Jetzt sichern</button><button class="btn grow" onclick="restoreBridge()">Aus Google Drive wiederherstellen</button></div></div>
