@@ -988,8 +988,68 @@ function resetOrder(){S.exercises.forEach(e=>{const k=TRAINER_ORDER[(e.nr||'').t
 function delEx(id){const e=X(id);if(!confirm(e.name+' wirklich löschen? Der Verlauf bleibt erhalten.'))return;S.exercises=S.exercises.filter(x=>x.id!==id);save();closeSheet();render();}
 
 /* ================= Verlauf ================= */
+/* ===== Fortschritt: Häufigkeit & Kraftentwicklung ===== */
+const e1rm=(w,r)=>{w=+w;r=parseInt(r);return w>0&&r>0?w*(1+r/30):0;};   // geschätzte Maximalkraft (Epley) – vergleichbar trotz anderer Wdh.-Bereiche
+const bestOf=x=>{let b=null;(x.sets||[]).forEach(z=>{const v=e1rm(z.w,z.reps);if(v&&(!b||v>b.v))b={v,w:+z.w,r:parseInt(z.reps)};});return b;};
+const weekStart=d=>{d=new Date(d);d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7));return d.getTime();};
+const fmtDM=d=>new Date(d).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit'});
+function progressData(){
+  const ss=S.sessions.slice().sort((a,b)=>new Date(a.date)-new Date(b.date)),base={},dev={};
+  const idx=[];
+  ss.forEach(s=>{const r=[];s.entries.forEach(x=>{const b=bestOf(x);if(!b)return;
+      if(!base[x.exId])base[x.exId]=b.v;r.push(b.v/base[x.exId]);
+      (dev[x.exId]=dev[x.exId]||{name:x.name,nr:x.nr,pts:[]}).pts.push({d:s.date,...b});});
+    if(r.length)idx.push({d:s.date,v:Math.round(r.reduce((a,b)=>a+b,0)/r.length*100)});});
+  // Wochen über Kalendertage zurückzählen (nicht in Millisekunden) – sonst verrutscht es bei der Zeitumstellung
+  const weeks=new Set(ss.map(s=>weekStart(s.date))),now=weekStart(Date.now()),back=(t,k)=>{const d=new Date(t);d.setDate(d.getDate()-7*k);return weekStart(d);};
+  let streak=0,w=weeks.has(now)?now:back(now,1);while(weeks.has(w)){streak++;w=back(w,1);}
+  const grid=[];for(let k=11;k>=0;k--){const t=back(now,k);grid.push({t,on:weeks.has(t),n:ss.filter(s=>weekStart(s.date)===t).length});}
+  const m=new Date();const month=ss.filter(s=>{const d=new Date(s.date);return d.getMonth()===m.getMonth()&&d.getFullYear()===m.getFullYear();}).length;
+  return {ss,idx,dev:Object.values(dev).filter(d=>d.pts.length),streak,grid,month,mins:ss.reduce((t,s)=>t+(+s.min||0),0)};
+}
+function lineChart(pts,sel){
+  const Wd=340,H=150,L=34,R=12,T=14,B=24,vals=pts.map(p=>p.v),lo=Math.min(95,...vals)-3,hi=Math.max(105,...vals)+3;
+  const x=i=>L+(pts.length<2?(Wd-L-R)/2:i*(Wd-L-R)/(pts.length-1)),y=v=>T+(hi-v)/(hi-lo)*(H-T-B);
+  const ticks=[...new Set([100,Math.ceil(lo/10)*10,Math.floor(hi/10)*10])].filter(v=>v>=lo&&v<=hi);
+  const path=pts.map((p,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(p.v).toFixed(1)).join(' ');
+  return `<svg viewBox="0 0 ${Wd} ${H}" style="width:100%;display:block" role="img" aria-label="Kraftindex je Training">
+  ${ticks.map(v=>`<line x1="${L}" x2="${Wd-R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)" stroke-width="1" ${v===100?'stroke-dasharray="4 4"':''}/><text x="${L-6}" y="${y(v)+4}" text-anchor="end" font-size="11" fill="var(--muted)">${v}</text>`).join('')}
+  <path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+  ${pts.map((p,i)=>`<circle cx="${x(i)}" cy="${y(p.v)}" r="${i===sel?6:4}" fill="var(--accent)" stroke="var(--card)" stroke-width="2"/>`).join('')}
+  ${sel!==null&&pts[sel]?`<line x1="${x(sel)}" x2="${x(sel)}" y1="${T}" y2="${H-B}" stroke="var(--muted)" stroke-width="1"/>`:''}
+  <text x="${L}" y="${H-6}" font-size="11" fill="var(--muted)">${fmtDM(pts[0].d)}</text>${pts.length>1?`<text x="${Wd-R}" y="${H-6}" font-size="11" fill="var(--muted)" text-anchor="end">${fmtDM(pts[pts.length-1].d)}</text>`:''}
+  ${pts.map((p,i)=>`<rect x="${x(i)-Math.max(12,(Wd-L-R)/Math.max(1,pts.length-1)/2)}" y="0" width="${Math.max(24,(Wd-L-R)/Math.max(1,pts.length-1))}" height="${H}" fill="transparent" onclick="ui.kSel=${i};render()"/>`).join('')}
+  </svg>`;
+}
+function spark(pts){const Wd=90,H=28,vs=pts.map(p=>p.v),lo=Math.min(...vs),hi=Math.max(...vs),sp=hi-lo||1;
+  const x=i=>pts.length<2?Wd/2:3+i*(Wd-6)/(pts.length-1),y=v=>H-4-(v-lo)/sp*(H-8);
+  return `<svg viewBox="0 0 ${Wd} ${H}" width="${Wd}" height="${H}" aria-hidden="true"><polyline points="${pts.map((p,i)=>x(i).toFixed(1)+','+y(p.v).toFixed(1)).join(' ')}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${x(pts.length-1)}" cy="${y(pts[pts.length-1].v)}" r="3" fill="var(--accent)"/></svg>`;}
+function progressView(){
+  const P=progressData();if(!P.ss.length)return '';
+  const tile=(l,v,sub)=>`<div class="card" style="margin:0;padding:10px 8px;text-align:center"><div class="small muted">${l}</div><div style="font-size:24px;font-weight:800">${v}</div>${sub?`<div class="small muted">${sub}</div>`:''}</div>`;
+  let h=`<h2>Fortschritt</h2><div class="grid3" style="gap:8px">${tile('Trainings',P.ss.length,P.month+' diesen Monat')}${tile('Wochen in Folge',P.streak,P.streak>=4?'🔥 stark':'Ziel: 1× pro Woche')}${tile('Trainingszeit',P.mins>=120?(P.mins/60).toLocaleString('de-DE',{maximumFractionDigits:1})+' h':P.mins+' min','insgesamt')}</div>`;
+  const on=P.grid.filter(g=>g.on).length;
+  h+=`<div class="card" style="margin-top:10px"><div class="row between"><b>Letzte 12 Wochen</b><span class="small muted">${on} von 12 Wochen trainiert</span></div>
+  <div style="display:grid;grid-template-columns:repeat(12,1fr);gap:4px;margin-top:10px">${P.grid.map((g,i)=>`<div title="Woche ab ${fmtDM(g.t)}: ${g.n} Training${g.n===1?'':'s'}" style="aspect-ratio:1;border-radius:4px;background:${g.on?'var(--accent)':'var(--card2)'};border:1px solid ${i===11?'var(--text)':'var(--line)'}"></div>`).join('')}</div>
+  <div class="row between small muted" style="margin-top:6px"><span>${fmtDM(P.grid[0].t)}</span><span>diese Woche</span></div></div>`;
+  if(P.idx.length>=2){
+    const last=P.idx[P.idx.length-1].v,sel=ui.kSel!=null&&P.idx[ui.kSel]?ui.kSel:null,sp=sel!==null?P.idx[sel]:null;
+    h+=`<div class="card"><div class="row between"><b>Kraftindex</b><span style="font-weight:800;color:${last>=100?'var(--accent)':'var(--warn)'}">${last>=100?'+':''}${last-100} % seit Start</span></div>
+    <div class="small muted" style="margin:4px 0 8px">Geschätzte Maximalkraft aller Geräte, Start = 100. Berücksichtigt Gewicht und Wiederholungen – mehr Wdh. bei gleichem Gewicht zählt also auch.</div>
+    ${lineChart(P.idx,sel)}<div class="small" style="min-height:20px;margin-top:4px">${sp?`<b>${fmtDate(sp.d)}</b>: Index ${sp.v}`:'<span class="muted">Tippe auf einen Punkt für Details.</span>'}</div></div>`;
+  }else h+=`<div class="card small muted">Ab dem zweiten Training siehst du hier deinen Kraftindex – wie sich Gewichte und Wiederholungen über die Zeit entwickeln.</div>`;
+  const devs=P.dev.map(d=>{const f=d.pts[0],l=d.pts[d.pts.length-1];return {...d,f,l,ch:Math.round((l.v/f.v-1)*100)};}).sort((a,b)=>b.ch-a.ch);
+  if(devs.length){
+    h+=`<h2>Je Gerät</h2><div class="card">${devs.map((d,i)=>`<div class="row between" style="${i?'border-top:1px dashed var(--line);padding-top:10px;margin-top:10px':''}"><div class="grow"><b>${esc(d.name)}</b>
+    <div class="small muted sets">${d.pts.length>1?`${fmtW(d.f.w).replace(' kg','')}×${d.f.r} → ${fmtW(d.l.w).replace(' kg','')}×${d.l.r} kg`:`${fmtW(d.l.w).replace(' kg','')}×${d.l.r} kg · 1 Training`}</div></div>
+    ${d.pts.length>1?spark(d.pts):''}<span style="min-width:56px;text-align:right;font-weight:800;color:${d.ch>0?'var(--accent)':d.ch<0?'var(--warn)':'var(--muted)'}">${d.pts.length>1?(d.ch>0?'+':'')+d.ch+' %':'–'}</span></div>`).join('')}
+    <p class="small muted" style="margin:10px 0 0">Bester Satz im ersten → letzten Training. Prozent = Veränderung der geschätzten Maximalkraft.</p></div>`;
+  }
+  return h+'<h2>Alle Trainings</h2>';
+}
 function vHistory(){
-  let h='<h1>Verlauf</h1>';if(!S.sessions.length)return h+'<p class="muted">Noch keine Trainings gespeichert.</p>';
+  let h='<h1>Verlauf</h1>';if(!S.sessions.length)return h+'<p class="muted">Noch keine Trainings gespeichert. Nach deinem ersten Training siehst du hier deinen Fortschritt.</p>';
+  h+=progressView();
   h+=S.sessions.map(s=>`<details class="card"><summary class="row between" style="cursor:pointer"><span><b>${fmtDate(s.date)}</b> <span class="muted small">· ${esc(MODES[s.mode]?MODES[s.mode].t:s.mode)}</span></span><span class="muted small">${s.min} min · ${s.entries.length} Üb.</span></summary>
   <div style="margin-top:10px">${s.entries.map(x=>`<div class="small" style="margin-bottom:8px"><b>${esc(x.name)}</b> <span class="muted">${x.nr?'#'+esc(x.nr):''}</span><div class="sets">${x.sets.map(z=>fmtW(z.w).replace(' kg','')+'×'+esc(z.reps)).join(' · ')||'–'}</div>${x.note?`<div class="muted">${esc(x.note)}</div>`:''}</div>`).join('')}
   <button class="btn sm danger" onclick="delSession('${s.id}')">Eintrag löschen</button></div></details>`).join('');
@@ -1077,7 +1137,7 @@ function vSettings(){
   <button class="btn big" style="margin-top:12px" onclick="resetRx()">Trainer-Vorgaben neu laden</button>
   <p class="small muted">Setzt Sätze, Wdh.-Bereiche und Tipps deiner Startgeräte auf die Trainer-Werte zurück. Gewichte und Verlauf bleiben.</p>
   <button class="btn big danger" style="margin-top:4px" onclick="resetAll()">Alles zurücksetzen</button></div>
-  <p class="small muted center">Trainingscoach · Version 2.7</p>`;
+  <p class="small muted center">Trainingscoach · Version 2.8</p>`;
 }
 function saveSettings(){
   const g=id=>document.getElementById(id),st=S.settings;
