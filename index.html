@@ -109,7 +109,7 @@ const MODES={
 };
 const MODELS=[['claude-sonnet-5-5','Sonnet 5.5 (empfohlen)'],['claude-haiku-5-5','Haiku 5.5 (günstig)'],['claude-opus-5-5','Opus 5.5 (am stärksten)']];
 
-function defaultSettings(){return {apiKey:'',model:'claude-sonnet-5-5',warmup:8,warmupText:'Rad oder Crosstrainer, locker steigernd',step:5,cooldown:true,backup:{code:'',last:'',err:''}};}
+function defaultSettings(){return {apiKey:'',model:'claude-sonnet-5-5',warmup:8,warmupText:'Rad oder Crosstrainer, locker steigernd',step:5,cooldown:true,coolRounds:2,coolHold:30,coolOff:[],backup:{code:'',last:'',err:''}};}
 /* Cool-down Nacken & Schultern – geführt, ohne Geräte, auf einer Bank oder einem Sitz */
 const COOL=[
  {n:'Schultern kreisen',sec:30,t:'Aufrecht hinsetzen, Arme hängen locker. Schultern langsam und groß nach hinten kreisen: hoch, zurück, tief nach unten. Beim Runtersinken ausatmen.'},
@@ -121,7 +121,20 @@ const COOL=[
  {n:'Brust dehnen',side:'rechts',sec:30,t:'Rechten Unterarm auf Schulterhöhe an einen Türrahmen oder eine Gerätestange legen, Ellbogen im rechten Winkel. Oberkörper langsam nach links wegdrehen, bis es vorne rechts in der Brust dehnt. Schulter nicht hochziehen.'},
  {n:'Brust dehnen',side:'links',sec:30,t:'Linken Unterarm auf Schulterhöhe an einen Türrahmen oder eine Gerätestange legen, Ellbogen im rechten Winkel. Oberkörper langsam nach rechts wegdrehen, bis es vorne links in der Brust dehnt. Schulter nicht hochziehen.'}
 ];
-const COOL_SEC=COOL.reduce((t,c)=>t+c.sec+5,0);
+/* Konfigurierbares Cool-down: Durchgänge (je Seite im Wechsel), Haltezeit, Auswahl der Übungen */
+const COOL_KEY=c=>c.n;                                   // Übungen gleichen Namens (rechts/links) gehören zusammen
+const COOL_NAMES=[...new Set(COOL.map(COOL_KEY))];
+function coolCfg(p){const st=S.settings;return {rounds:clamp(parseInt((p&&p.coolRounds)||st.coolRounds)||1,1,4),hold:clamp(parseInt(st.coolHold)||30,15,90),off:Array.isArray(st.coolOff)?st.coolOff:[]};}
+function coolSteps(p){
+  const cfg=coolCfg(p),out=[];
+  COOL_NAMES.filter(n=>!cfg.off.includes(n)).forEach(n=>{
+    const idx=COOL.map((c,i)=>i).filter(i=>COOL[i].n===n),sided=COOL[idx[0]].side;
+    if(!sided){idx.forEach(c=>out.push({t:'cool',c,sec:COOL[c].sec}));return;}
+    for(let r=0;r<cfg.rounds;r++)idx.forEach(c=>out.push({t:'cool',c,sec:cfg.hold,r,rn:cfg.rounds}));
+  });
+  return out;
+}
+const coolSec=p=>coolSteps(p).reduce((t,x)=>t+x.sec+5,0);
 function seed(){
   const e=(name,nr,cat,type,group,sets,reps,weight,start,o={})=>({id:uid(),name,nr,cat,type,group,sets,reps,weight,startWeight:start,knee:!!o.knee,prio:o.prio||2,rest:null,note:o.note||'',active:true,hist:[],order:trainerOrder({name,nr,cat})});
   return {v:1,settings:defaultSettings(),sessions:[],active:null,draft:null,summary:null,exercises:[
@@ -215,7 +228,7 @@ function single(e){return {kind:'single',warmupSet:e.cat==='beine'&&e.type==='me
 /* Zeitschätzung – dieselbe Formel für Planung und Live-Anzeige:
    Satzdauer ≈ 10 s Einstellen + 3 s pro Wdh.; nach jedem Satz die Pause (die letzte Pause einer Station = Gerätewechsel) */
 function setSec(reps){const r=parseRange(reps);const m=r?(r[0]+r[1])/2:12;return clamp(Math.round(10+3*m),30,80);}
-function stepsSec(plan,steps){let t=0;steps.forEach((s,k)=>{if(s.t==='cool'){t+=(COOL[s.c]?COOL[s.c].sec:30)+5;return;}const b=plan.blocks[s.b];if(!b)return;const it=b.items[s.i]||b.items[0];t+=s.ws?55:setSec(it.reps);
+function stepsSec(plan,steps){let t=0;steps.forEach((s,k)=>{if(s.t==='cool'){t+=(s.sec||(COOL[s.c]?COOL[s.c].sec:30))+5;return;}const b=plan.blocks[s.b];if(!b)return;const it=b.items[s.i]||b.items[0];t+=s.ws?55:setSec(it.reps);
   if(k<steps.length-1){const n=steps[k+1];t+=s.ws?60:(n.b===s.b&&n.r===s.r)?(b.restIn||0):b.rest;}});return t;}
 function blockSec(b){let t=0;if(b.warmupSet)t+=55+60;for(let r=0;r<b.rounds;r++)b.items.forEach((it,ii)=>{t+=setSec(it.reps)+(ii<b.items.length-1?(b.restIn||0):b.rest);});return t;}
 function planSec(p){return p.warmup.min*60+stepsSec(p,buildSteps(p).filter(s=>s.t!=='warm'));}
@@ -249,7 +262,7 @@ function rulePlan(mode,minutes){
   }
   const gPrio=p=>Math.min(...p.g.map(prioOf));
   picks.sort((a,b)=>gPrio(a)-gPrio(b));
-  const budget=(minutes-S.settings.warmup)*60-(S.settings.cooldown?COOL_SEC:0);
+  const budget=(minutes-S.settings.warmup)*60-(S.settings.cooldown?coolSec():0);
   let blocks=[],used=0;const usedIds=new Set();
   for(const p of picks){const b=single(p.e),s=blockSec(b),must=Math.min(...p.g.map(x=>x.prio))===1;
     if(used+s<=budget||must){blocks.push(b);used+=s;usedIds.add(p.e.id);}}
@@ -360,7 +373,7 @@ function validatePlan(p){
   return {title:String(p.title||''),comment:String(p.comment||''),warmup:{min:clamp(parseInt(p.warmup&&p.warmup.min)||S.settings.warmup,0,30),text:String((p.warmup&&p.warmup.text)||S.settings.warmupText)},blocks};
 }
 async function aiPlan(mode,minutes){
-  const user=`Modus: ${MODES[mode].t}\nAufgabe: ${MODE_AI[mode]}\nVerfügbare Zeit inkl. Aufwärmen${S.settings.cooldown?' und '+Math.round(COOL_SEC/60)+' min Cool-down (Nacken/Brust-Dehnung, plant die App selbst ans Ende)':''}: ${minutes} min. Standard-Aufwärmen: ${S.settings.warmup} min (${S.settings.warmupText}).\nÜbergib den Plan mit dem Werkzeug plan_speichern.\n\nDaten:\n${JSON.stringify(trainerContext())}`;
+  const user=`Modus: ${MODES[mode].t}\nAufgabe: ${MODE_AI[mode]}\nVerfügbare Zeit inkl. Aufwärmen${S.settings.cooldown?' und '+Math.round(coolSec()/60)+' min Cool-down (Nacken/Brust-Dehnung, plant die App selbst ans Ende)':''}: ${minutes} min. Standard-Aufwärmen: ${S.settings.warmup} min (${S.settings.warmupText}).\nÜbergib den Plan mit dem Werkzeug plan_speichern.\n\nDaten:\n${JSON.stringify(trainerContext())}`;
   return validatePlan(await askAITool(TRAINER_SYS,user,'plan_speichern',PLAN_TOOL_SCHEMA,4000));
 }
 
@@ -430,7 +443,9 @@ function vPlan(){
   h+=checkCard(p);
   h+=`<div class="card"><div class="row between"><div class="grow"><b>Aufwärmen</b><div class="muted small">${esc(p.warmup.text)}</div></div>${stepper(p.warmup.min+' min','wu(-1)','wu(1)')}</div></div>`;
   p.blocks.forEach((b,bi)=>h+=blockCard(b,bi));
-  h+=`<div class="card"><div class="row between"><div class="grow"><b>Cool-down Nacken & Brust</b><div class="muted small">${p.cooldown?COOL.length+' geführte Dehnungen · ≈ '+Math.round(COOL_SEC/60)+' min':'aus'}</div></div><input type="checkbox" ${p.cooldown?'checked':''} onchange="S.draft.cooldown=this.checked;touch()"></div></div>`;
+  {const cs=coolSteps(p),cr=coolCfg(p).rounds;
+  h+=`<div class="card"><div class="row between"><div class="grow"><b>Cool-down Nacken & Brust</b><div class="muted small">${p.cooldown?cs.length+' Dehnungen · ≈ '+Math.round(coolSec(p)/60)+' min':'aus'}</div></div><input type="checkbox" ${p.cooldown?'checked':''} onchange="S.draft.cooldown=this.checked;touch()"></div>
+  ${p.cooldown?`<div class="row between" style="margin-top:10px"><span class="small">Durchgänge je Seite</span>${stepper(cr+'×','coolR(-1)','coolR(1)')}</div><div class="small muted" style="margin-top:6px">Haltezeit und Auswahl der Dehnungen unter Einstellungen.</div>`:''}</div>`;}
   h+=`<button class="btn big" onclick="addToPlan()">+ Übung hinzufügen</button>
   <div class="row" style="margin-top:10px"><button class="btn grow" onclick="makePlan()" ${ui.busy?'disabled':''}>${ui.busy?'Trainer plant …':'↻ Neu vorschlagen'}</button></div>
   <button class="btn primary big" style="margin-top:10px" onclick="startSession()">Training starten</button>`;
@@ -505,6 +520,7 @@ async function aiCheck(){
   }catch(e){toast('KI-Fehler: '+e.message);}
   ui.busy=false;save();render();
 }
+function coolR(d){const p=S.draft;p.coolRounds=clamp(coolCfg(p).rounds+d,1,4);save();render();}
 function toggleEdit(bi){ui.editBlock=ui.editBlock===bi?null:bi;render();}
 function wu(d){const p=S.draft;p.warmup.min=clamp(p.warmup.min+d,0,30);touch();}
 function bset(bi,k,d){const b=S.draft.blocks[bi],lim={rounds:[1,8],rest:[15,300],restIn:[0,120]}[k];b[k]=clamp((b[k]||0)+d,lim[0],lim[1]);touch();}
@@ -543,7 +559,7 @@ function addToPlan(){
 
 /* ================= Training durchführen ================= */
 let timerInt=null,lastBeep=-1;
-function buildSteps(p){const s=[];if(p.warmup.min>0)s.push({t:'warm'});p.blocks.forEach((b,bi)=>{if(b.warmupSet&&b.kind==='single')s.push({t:'set',b:bi,i:0,r:-1,ws:true});for(let r=0;r<b.rounds;r++)b.items.forEach((it,ii)=>s.push({t:'set',b:bi,i:ii,r}));});if(p.cooldown)COOL.forEach((_,c)=>s.push({t:'cool',c}));return s;}
+function buildSteps(p){const s=[];if(p.warmup.min>0)s.push({t:'warm'});p.blocks.forEach((b,bi)=>{if(b.warmupSet&&b.kind==='single')s.push({t:'set',b:bi,i:0,r:-1,ws:true});for(let r=0;r<b.rounds;r++)b.items.forEach((it,ii)=>s.push({t:'set',b:bi,i:ii,r}));});if(p.cooldown)s.push(...coolSteps(p));return s;}
 const coolLast=arr=>arr.filter(x=>x.t!=='cool').concat(arr.filter(x=>x.t==='cool'));
 const wsWeight=(w,e)=>roundW(w*.6,e);
 function startSession(){
@@ -556,7 +572,7 @@ function startSession(){
 function enterStep(){
   const a=S.active,st=a.steps[a.idx];if(!st){finish();return false;}
   if(st.t==='warm'){a.phase='warm';a.restTotal=a.plan.warmup.min*60;a.endsAt=Date.now()+a.restTotal*1000;}
-  else if(st.t==='cool'){a.phase='cool';a.restTotal=(COOL[st.c]||{sec:30}).sec;a.endsAt=Date.now()+a.restTotal*1000;}
+  else if(st.t==='cool'){a.phase='cool';a.restTotal=st.sec||(COOL[st.c]||{sec:30}).sec;a.endsAt=Date.now()+a.restTotal*1000;}
   else{a.phase='set';a.endsAt=null;}
   ui.reps=null;return true;
 }
@@ -580,7 +596,7 @@ function ring(left,total){return `<div class="ringwrap"><svg viewBox="0 0 240 24
 function coolView(a){
   const st=a.steps[a.idx],c=COOL[st.c]||COOL[0],left=Math.max(0,Math.ceil((a.endsAt-Date.now())/1000));
   const all=a.steps.filter(x=>x.t==='cool'),no=all.indexOf(st)+1,nx=a.steps[a.idx+1],nc=nx&&nx.t==='cool'?COOL[nx.c]:null;
-  return `<div class="muted small">Cool-down · Dehnung ${no} von ${all.length}</div><h1 class="ex-title">${esc(c.n)}</h1>${c.side?`<div class="setno">${esc(c.side)}</div>`:'<div style="height:12px"></div>'}
+  return `<div class="muted small">Cool-down · Dehnung ${no} von ${all.length}</div><h1 class="ex-title">${esc(c.n)}</h1>${c.side?`<div class="setno">${esc(c.side)}${st.rn>1?' · Durchgang '+(st.r+1)+' von '+st.rn:''}</div>`:'<div style="height:12px"></div>'}
   <div class="card">${esc(c.t)}</div>
   ${no===1?'<div class="card small">💡 Nur leichtes Ziehen, nie Schmerz. Nicht wippen, ruhig weiteratmen.</div>':''}
   ${ring(left,a.restTotal)}
@@ -1041,8 +1057,14 @@ function vSettings(){
   <p class="small muted">Der Schlüssel bleibt nur auf diesem Gerät. Ohne Schlüssel plant der eingebaute Regel-Trainer.</p></div>
   <h2>Aufwärmen & Gewichte</h2><div class="card"><div class="grid2"><div><label class="f" style="margin-top:0">Aufwärmen (min)</label><input id="s_wu" type="number" min="0" max="30" value="${st.warmup}"></div><div><label class="f" style="margin-top:0">Gewichtsschritt (kg)</label><input id="s_step" type="number" step="0.5" min="0.5" value="${st.step}"></div></div>
   <label class="f">Aufwärmen – was?</label><input id="s_wut" value="${esc(st.warmupText)}">
-  <label class="row" style="margin-top:14px"><input type="checkbox" id="s_cool" ${st.cooldown!==false?'checked':''}> <span>Cool-down Nacken & Brust am Ende (≈ ${Math.round(COOL_SEC/60)} min, geführt)</span></label>
   <button class="btn primary big" style="margin-top:12px" onclick="saveSettings()">Speichern</button></div>
+  <h2>Cool-down</h2><div class="card">
+  <label class="row" style="margin-top:0"><input type="checkbox" id="s_cool" ${st.cooldown!==false?'checked':''}> <span>Cool-down Nacken & Brust am Ende (geführt)</span></label>
+  <div class="grid2"><div><label class="f">Durchgänge je Seite</label><input id="s_cr" type="number" min="1" max="4" value="${coolCfg().rounds}"></div><div><label class="f">Haltezeit je Dehnung (s)</label><input id="s_ch" type="number" min="15" max="90" step="5" value="${coolCfg().hold}"></div></div>
+  <label class="f">Dehnungen</label>
+  ${COOL_NAMES.map((n,i)=>`<label class="row" style="margin-top:8px"><input type="checkbox" class="s_cn" data-n="${esc(n)}" ${coolCfg().off.includes(n)?'':'checked'}> <span>${esc(n)}${COOL.find(c=>c.n===n).side?'':' <span class="muted small">(einmal)</span>'}</span></label>`).join('')}
+  <p class="small muted">Rechts und links wechseln sich pro Durchgang ab. Aktuell ≈ ${Math.round(coolSec()/60)} min.</p>
+  <button class="btn primary big" onclick="saveSettings()">Speichern</button></div>
   <h2>Automatisches Backup</h2><div class="card">
   <p class="small muted" style="margin-top:0">Sichert nach jedem Training in dein Google Drive (Ordner „App-Backups“). Auf einem neuen Handy den Code einfügen und wiederherstellen. Bewahre den Code im Google Passwortmanager auf.</p>
   <label class="f" style="margin-top:0">Backup-Code</label><input id="b_code" type="password" autocomplete="off" value="${esc(bkCfg().code)}" placeholder="https://script.google.com/macros/s/…/exec#…">
@@ -1055,12 +1077,13 @@ function vSettings(){
   <button class="btn big" style="margin-top:12px" onclick="resetRx()">Trainer-Vorgaben neu laden</button>
   <p class="small muted">Setzt Sätze, Wdh.-Bereiche und Tipps deiner Startgeräte auf die Trainer-Werte zurück. Gewichte und Verlauf bleiben.</p>
   <button class="btn big danger" style="margin-top:4px" onclick="resetAll()">Alles zurücksetzen</button></div>
-  <p class="small muted center">Trainingscoach · Version 2.6</p>`;
+  <p class="small muted center">Trainingscoach · Version 2.7</p>`;
 }
 function saveSettings(){
   const g=id=>document.getElementById(id),st=S.settings;
   if(g('s_key'))st.apiKey=g('s_key').value.trim();if(g('s_model'))st.model=g('s_model').value;
-  st.warmup=clamp(parseInt(g('s_wu').value)||0,0,30);st.step=parseFloat(String(g('s_step').value).replace(',','.'))||2.5;st.warmupText=g('s_wut').value.trim()||defaultSettings().warmupText;if(g('s_cool'))st.cooldown=g('s_cool').checked;
+  st.warmup=clamp(parseInt(g('s_wu').value)||0,0,30);st.step=parseFloat(String(g('s_step').value).replace(',','.'))||2.5;st.warmupText=g('s_wut').value.trim()||defaultSettings().warmupText;if(g('s_cool'))st.cooldown=g('s_cool').checked;if(g('s_cr'))st.coolRounds=clamp(parseInt(g('s_cr').value)||1,1,4);if(g('s_ch'))st.coolHold=clamp(parseInt(g('s_ch').value)||30,15,90);
+  {const cb=[...document.querySelectorAll('.s_cn')];if(cb.length){st.coolOff=cb.filter(x=>!x.checked).map(x=>x.dataset.n);if(st.coolOff.length===COOL_NAMES.length){st.coolOff=[];st.cooldown=false;}}}
   save();toast('Gespeichert');render();
 }
 async function testKey(){saveSettings();try{await askAI('Antworte nur mit OK.','Test',5);toast('✓ KI-Trainer erreichbar');}catch(e){toast('✗ '+e.message);}}
