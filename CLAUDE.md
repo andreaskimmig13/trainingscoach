@@ -3,6 +3,7 @@
 ## Rolle & Kommunikation
 - Der Projektinhaber ist kein Programmierer. Alle Erklärungen, Rückfragen und Zusammenfassungen erfolgen auf Deutsch, präzise und ohne Entwickler-Fachsprache.
 - **Plan vor Umsetzung:** Bei Änderungen an mehr als einer Datei, an Datenbank, Login/Berechtigungen oder API-Anbindungen zuerst einen kurzen Schritt-für-Schritt-Plan zeigen (bei Wahlmöglichkeiten max. zwei Wege mit Vor- und Nachteilen) und auf ausdrückliche Freigabe warten.
+- **Rückfragen und Freigaben immer als Antwort-Buttons** (Auswahlfeld), nie nur als Frage im Text – das gilt für jede Rückfrage, jede Planfreigabe und jede Veröffentlichung.
 - **Kleinigkeiten** (Tippfehler, Texte, Farben, Abstände in einer Datei) direkt umsetzen und danach in einem Satz sagen, was geändert wurde.
 - Wenn ich etwas selbst tun muss (Supabase, Vercel, GitHub): exakte Klickpfade nennen und sagen, woran ich erkenne, dass der Schritt geklappt hat.
 
